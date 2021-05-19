@@ -1,0 +1,136 @@
+---
+
+- name: "disallow SSH password authentication"
+  become: true
+  lineinfile:
+    dest: /etc/ssh/sshd_config
+    insertafter: "^#PasswordAuthentication"
+    line: "PasswordAuthentication no"
+    state: present
+  notify: restart ssh
+
+- name: "disallow SSH root access"
+  become: true
+  lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: "^PermitRootLogin"
+    line: "PermitRootLogin no"
+    state: present
+  notify: restart ssh
+
+- name: "install list of base packages"
+  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+  become: true
+  apt:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - tzdata
+    - vim
+    - psmisc
+    - screen
+    - ntp
+    - iptables
+    - wget
+    - curl
+    - rsync
+    - tcpdump
+    - tshark
+    - unzip
+    - xauth
+    - telnet
+    - nano
+    - bash-completion
+    - net-tools
+    - python-pip
+    - git
+    - tree
+    - locales
+
+- name: "generate /etc/hostname"
+  become: true
+  template:
+    src: hostname.j2
+    dest: /etc/hostname
+    mode: 0644
+
+- name: "set timezone"
+  become: true
+  timezone:
+    name: Europe/Paris
+
+- name: "configure /etc/default/locale"
+  become: true
+  copy:
+    src: "locale"
+    dest: "/etc/default/locale"
+    mode: 0644
+
+- name: "configure /etc/locale.gen"
+  become: true
+  copy:
+    src: "locale.gen"
+    dest: "/etc/locale.gen"
+    mode: 0644
+
+- name: "ensure en_US.UTF-8 locale exists"
+  become: true
+  locale_gen:
+    name: en_US.UTF-8
+    state: present
+
+- name: "ensure fr_FR.UTF-8 locale exists"
+  become: true
+  locale_gen:
+    name: fr_FR.UTF-8
+    state: present
+
+- name: "setup .bashrc for root"
+  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+  become: true
+  copy:
+    src: "bashrc"
+    dest: "/root/.bashrc"
+    mode: 0644
+
+- name: "setup .bashrc"
+  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+  copy:
+    src: "bashrc"
+    dest: "~/.bashrc"
+    mode: 0644
+
+- name: "setup .vimrc for root"
+  become: true
+  copy:
+    src: "vimrc"
+    dest: "/root/.vimrc"
+    mode: 0644
+
+- name: "setup .vimrc"
+  copy:
+    src: "vimrc"
+    dest: "~/.vimrc"
+    mode: 0644
+
+- name: "generate /etc/network/iptables.up.rules"
+  become: true
+  template:
+    src: iptables.up.rules.j2
+    dest: /etc/network/iptables.up.rules
+    mode: 0644
+  notify: reload iptables
+
+- name: "disable cloud-init warnings"
+  become: true
+  when: disable_cloud_init_warnings
+  file:
+    path: /var/lib/cloud/instance/warnings/.skip
+    state: touch
+
+- name: "disable cloud-init warnings"
+  when: disable_cloud_init_warnings
+  file:
+    path: "/home/{{ deploy_user }}/.cloud-warnings.skip"
+    state: touch
+

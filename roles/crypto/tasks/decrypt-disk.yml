@@ -1,0 +1,22 @@
+---
+- name: "create temp file"
+  become: true
+  command: mktemp /tmp/encdisk.XXXXXXX
+  register: tmp
+
+- name: "write password to temp file"
+  become: true
+  template: src=templates/encrypt-pass.j2 dest={{ tmp.stdout }}
+ 
+- name: "open encrypted disk"
+  become: true
+  shell: cat {{ tmp.stdout }} | cryptsetup luksOpen {{ luks_dev }} {{ luks_name }}
+
+- name: "purge temp file"
+  become: true
+  command: shred -z -u {{ tmp.stdout }}
+
+- name: "activate all known volume groups in the system"
+  become: true
+  command: vgchange -a y
+

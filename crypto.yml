@@ -1,0 +1,5 @@
+---
+
+- hosts: kodlin1.delarche.fr
+  roles:
+    - crypto

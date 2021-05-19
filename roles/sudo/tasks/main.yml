@@ -1,0 +1,27 @@
+---
+
+- name: "make sure we have a 'wheel' group"
+  group:
+    name: wheel
+    state: present
+
+- name: "allow 'wheel' group to have passwordless sudo"
+  lineinfile:
+    dest: /etc/sudoers
+    state: present
+    regexp: '^%wheel'
+    line: '%wheel ALL=(ALL) NOPASSWD: ALL'
+    validate: 'visudo -cf %s'
+
+- name: "add sudoers users to wheel group"
+  user:
+    name: olivier
+    password: $6$HQ2dhZe65Au8zyYD$ER/4bSIeYvOYBmbofWXIYUTZFJxwujQwZDTbqlYlpGxP4NA1YU71ggy9hlfRakhq/LPJXN4ignBTPzisWEn/L/
+    comment: "Olivier Desnoe"
+    groups:
+      - wheel
+    append: yes
+    state: present
+    createhome: yes
+    shell: /bin/bash
+

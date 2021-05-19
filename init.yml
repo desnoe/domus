@@ -1,0 +1,15 @@
+---
+- hosts: all
+  user: root
+  roles:
+    - apt
+    - sudo
+    - keys
+    - htop
+
+- hosts: all
+  roles:
+    - apt
+    - keys
+    - base
+    - htop

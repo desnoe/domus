@@ -1,0 +1,9 @@
+hostname: kodlin1
+
+luks_dev: /dev/sda
+luks_name: crypt_sda
+
+btrfs_subvolumeid_sync: 257
+btrfs_subvolumeid_snapshots: 258
+
+crypto_base_dir: /home/olivier/crypto

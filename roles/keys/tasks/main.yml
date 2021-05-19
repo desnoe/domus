@@ -1,0 +1,9 @@
+---
+
+- name: "add authorized keys"
+  authorized_key:
+    user: olivier
+    key: "{{ lookup('file', lookup('env','HOME') + '/.ssh/' + item + '.pub') }}"
+  with_items:
+    - id_rsa
+

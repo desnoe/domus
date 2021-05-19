@@ -1,0 +1,22 @@
+---
+
+- name: "install required packages"
+  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+  become: true
+  apt:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - htop
+
+- name: "check htop base config dir"
+  file:
+    path: "~/.config/htop"
+    state: directory
+    mode: 0700
+
+- name: "setup htoprc"
+  copy:
+    src: "htoprc"
+    dest: "~/.config/htop/htoprc"
+    mode: 0644

@@ -1,0 +1,16 @@
+- name: "install list of base packages"
+  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+  become: true
+  apt:
+    state: present
+    name:
+      - sudo
+      - aptitude
+
+- name: "update repositories cache and upgrade"
+  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+  become: true
+  apt:
+    upgrade: 'yes'
+    update_cache: 'yes'
+    cache_valid_time: 3600
