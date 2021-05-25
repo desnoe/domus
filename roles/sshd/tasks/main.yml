@@ -1,0 +1,27 @@
+---
+
+- name: "add authorized keys"
+  authorized_key:
+    user: olivier
+    key: "{{ lookup('file', lookup('env','HOME') + '/.ssh/' + item + '.pub') }}"
+  with_items:
+    - id_rsa
+
+- name: "disallow SSH password authentication"
+  become: true
+  lineinfile:
+    dest: /etc/ssh/sshd_config
+    insertafter: "^#PasswordAuthentication"
+    line: "PasswordAuthentication no"
+    state: present
+  notify: restart ssh
+
+- name: "disallow SSH root access"
+  become: true
+  lineinfile:
+    dest: /etc/ssh/sshd_config
+    regexp: "^PermitRootLogin"
+    line: "PermitRootLogin no"
+    state: present
+  notify: restart ssh
+

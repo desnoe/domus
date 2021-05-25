@@ -1,14 +1,4 @@
 ---
-- name: "install required packages"
-  become: true
-  apt:
-    state: present
-    name:
-      - cryptsetup-bin
-      - cryptsetup-run
-      - lvm2
-      - btrfs-tools
-  when: ansible_architecture != "x86_64"
 
 - name: "install required packages"
   become: true
@@ -18,58 +8,21 @@
       - cryptsetup
       - lvm2
       - btrfs-tools
-  when: ansible_architecture == "x86_64"
 
-- name: "check if volume has to be decrypted or not"
-  stat: "path=/dev/mapper/{{ luks_name }}"
-  register: luks_volume
+- name: "(re-)encrypt block device"
+  when: wipe == True
+  include: disk-encrypt.yml
 
-- name: "decrypt and activate encrypted block device"
-  when: luks_volume.stat.exists == False
-  include: decrypt-disk.yml
+- name: "decrypt and open encrypted block device"
+  include: disk-decrypt.yml
 
-- name: "check sync base dir"
-  file:
-    path: "{{ crypto_base_dir }}/sync"
-    state: directory
-    mode: 0755
+- name: "(re-)set LVM2 volumes"
+  when: wipe == True
+  include: lvm2-reset.yml
 
-- name: "mount sync dir"
-  become: true
-  mount:
-    name: "{{ crypto_base_dir }}/sync/"
-    src: /dev/vg_data/lv_data
-    fstype: btrfs
-    opts: "noauto,subvolid={{ btrfs_subvolumeid_sync }}"
-    state: mounted
+- name: "(re-)set partitions"
+  when: wipe == True
+  include: fs-reset.yml
 
-- name: "check snapshots base dir"
-  file:
-    path: "{{ crypto_base_dir }}/snapshots"
-    state: directory
-    mode: 0755
-
-- name: "mount snapshots dir"
-  become: true
-  mount:
-    name: "{{ crypto_base_dir }}/snapshots/"
-    src: /dev/vg_data/lv_data
-    fstype: btrfs
-    opts: "noauto,subvolid={{ btrfs_subvolumeid_snapshots }}"
-    state: mounted
-
-- name: "copy snapshot script"
-  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
-  copy:
-    src: "snapshot.sh"
-    dest: "{{ crypto_base_dir }}/"
-    mode: 0755
-
-- name: "install snapshot script in crontab"
-  cron:
-    name: "snapshot data"
-    user: "olivier"
-    hour: "5"
-    minute: "0"
-    job: "{{ crypto_base_dir }}/snapshot.sh"
-
+- name: "mount partitions"
+  include: fs-mount.yml

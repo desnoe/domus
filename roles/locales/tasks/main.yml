@@ -1,0 +1,36 @@
+---
+
+- name: "install list of base packages"
+  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+  become: true
+  apt:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - locales
+
+- name: "configure /etc/default/locale"
+  become: true
+  copy:
+    src: "locale"
+    dest: "/etc/default/locale"
+    mode: 0644
+
+- name: "configure /etc/locale.gen"
+  become: true
+  copy:
+    src: "locale.gen"
+    dest: "/etc/locale.gen"
+    mode: 0644
+
+- name: "ensure en_US.UTF-8 locale exists"
+  become: true
+  locale_gen:
+    name: en_US.UTF-8
+    state: present
+
+- name: "ensure fr_FR.UTF-8 locale exists"
+  become: true
+  locale_gen:
+    name: fr_FR.UTF-8
+    state: present

@@ -1,0 +1,22 @@
+---
+
+- name: "install list of base packages"
+  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+  become: true
+  apt:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - tzdata
+    - ntp
+
+- name: "set timezone"
+  become: true
+  timezone:
+    name: Europe/Paris
+
+- name: 'ensure NTP is running and enabled'
+  service:
+    name: ntp
+    state: started
+    enabled: true

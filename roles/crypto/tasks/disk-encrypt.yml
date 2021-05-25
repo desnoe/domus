@@ -1,0 +1,46 @@
+---
+- name: unmount sync
+  become: true
+  ansible.posix.mount:
+    path: "{{ crypto_base_dir }}/sync"
+    state: unmounted
+
+- name: unmount snapshots
+  become: true
+  ansible.posix.mount:
+    path: "{{ crypto_base_dir }}/snapshots"
+    state: unmounted
+
+- name: "check if encrypted volume exists or not"
+  ansible.builtin.stat:
+    path: /dev/mapper/{{ luks_name }}
+  register: luks_volume
+
+- name: "close volume group"
+  become: true
+  shell: lvchange -an vg_data
+  when: luks_volume.stat.exists
+
+- name: "close encrypted disk"
+  become: true
+  shell: cryptsetup luksClose /dev/mapper/{{ luks_name }}
+  when: luks_volume.stat.exists
+
+- name: "create temp file"
+  become: true
+  command: mktemp /tmp/encdisk.XXXXXXX
+  register: tmp
+
+- name: "write password to temp file"
+  become: true
+  template:
+    src: templates/encrypt-pass.j2
+    dest: "{{ tmp.stdout }}"
+ 
+- name: "encrypt disk"
+  become: true
+  shell: cat {{ tmp.stdout }} | cryptsetup luksFormat -v -c aes-xts-plain64 -h sha256 {{ luks_dev }}
+
+- name: "purge temp file"
+  become: true
+  command: shred -z -u {{ tmp.stdout }}

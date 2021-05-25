@@ -1,0 +1,2 @@
+luks_dev: /dev/sdb
+luks_name: crypt_sdb

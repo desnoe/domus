@@ -1,21 +1,16 @@
 ---
 - hosts: all
-  vars:
-    ansible_become: true
   roles:
     - apt
-    - sudo
-    - keys
-    - htop
-
-
-- hosts: all
-  roles:
-    - apt
-    - keys
     - base
     - htop
+    - iptables
+    - locales
+    - ntp
+    - sshd
+    - sudo
+    - vim
 
-- hosts: kodlin1
+- hosts: crypto
   roles:
     - crypto
