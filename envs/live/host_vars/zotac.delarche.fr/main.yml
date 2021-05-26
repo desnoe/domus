@@ -1,0 +1,2 @@
+luks_dev: /dev/sda
+luks_name: crypt_sda
