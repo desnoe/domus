@@ -1,5 +1,14 @@
 ---
 
+- name: "check crypto base dir"
+  become: true
+  ansible.builtin.file:
+    path: "{{ crypto_base_dir }}"
+    state: directory
+    mode: 0755
+    owner: olivier
+    group: olivier
+
 - name: create temporary directory
   ansible.builtin.tempfile:
     state: directory
