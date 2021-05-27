@@ -7,15 +7,17 @@
     name: "{{ item }}"
     state: present
   with_items:
-    - wget
+    - bash-completion
     - curl
+    - git
+    - man-db
+    - net-tools
+    - rsync
+    - telnet
+    - tree
     - unzip
     - xauth
-    - telnet
-    - bash-completion
-    - net-tools
-    - git
-    - tree
+    - wget
 
 - name: "generate /etc/hostname"
   become: true
