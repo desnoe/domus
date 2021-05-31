@@ -1,2 +1,10 @@
 luks_dev: /dev/sdb
 luks_name: crypt_sdb
+
+rclone_jobs:
+  - provider: onedrive
+    bucket: ""
+  - provider: S3
+    bucket: www.albatross-networks.com
+  - provider: S3
+    bucket: delarche-images

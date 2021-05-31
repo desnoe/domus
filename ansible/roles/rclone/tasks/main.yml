@@ -1,0 +1,37 @@
+---
+
+- name: "install required packages"
+  become: true
+  apt:
+    state: present
+    name:
+      - rclone
+
+- name: "check bin/logs base dir"
+  become: true
+  ansible.builtin.file:
+    path: "{{ crypto_base_dir }}/{{ item }}"
+    state: directory
+    mode: 0755
+    owner: olivier
+    group: olivier
+  loop:
+    - bin
+    - logs
+
+- name: "copy snapshot script"
+  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+  copy:
+    src: "rclone.sh"
+    dest: "{{ crypto_base_dir }}/bin/"
+    mode: 0755
+
+- name: "install rclone script in crontab"
+  ansible.builtin.cron:
+    name: "rclone {{ item.provider }} {{ item.bucket }}"
+    user: "olivier"
+    hour: "4"
+    minute: "0"
+    job: "{{ crypto_base_dir }}/bin/rclone.sh {{ item.provider }} {{ item.bucket }}"
+  loop: "{{ rclone_jobs | default('[]') }}"
+

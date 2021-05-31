@@ -108,7 +108,7 @@
     mode: 0755
 
 - name: "install snapshot script in crontab"
-  cron:
+  ansible.builtin.cron:
     name: "snapshot data"
     user: "olivier"
     hour: "5"

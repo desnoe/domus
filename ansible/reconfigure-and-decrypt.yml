@@ -14,3 +14,4 @@
 - hosts: crypto
   roles:
     - crypto
+    - rclone
