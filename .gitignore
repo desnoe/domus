@@ -1,1 +1,36 @@
-.idea
+# macOS
+.DS_Store
+
+# IDEs & Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Python & uv
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.uv/
+
+# Ansible
+*.retry
+.ansible/
+ansible/collections/
+.ansible-lint-cache/
+.cache/
+
+
+# Logs
+*.log
+
+# Pre-commit
+.pre-commit-cache/
+
+# Secrets
+.ansible_vault_pass
+*.vault_password
+*.key
+*.pem

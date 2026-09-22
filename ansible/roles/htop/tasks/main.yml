@@ -13,10 +13,10 @@
   file:
     path: "~/.config/htop"
     state: directory
-    mode: 0700
+    mode: "0700"
 
 - name: "setup htoprc"
   copy:
     src: "htoprc"
     dest: "~/.config/htop/htoprc"
-    mode: 0644
+    mode: "0644"

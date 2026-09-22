@@ -24,7 +24,7 @@
   template:
     src: hostname.j2
     dest: /etc/hostname
-    mode: 0644
+    mode: "0644"
 
 - name: "setup .bashrc for root"
   when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
@@ -32,11 +32,11 @@
   copy:
     src: "bashrc"
     dest: "/root/.bashrc"
-    mode: 0644
+    mode: "0644"
 
 - name: "setup .bashrc"
   when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
   copy:
     src: "bashrc"
     dest: "~/.bashrc"
-    mode: 0644
+    mode: "0644"

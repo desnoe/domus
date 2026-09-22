@@ -37,4 +37,3 @@
   ansible.posix.mount:
     name: "{{ crypto_base_dir }}"
     state: unmounted
-

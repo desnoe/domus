@@ -1,0 +1,10 @@
+---
+# Configuration de ansible-lint pour homecode
+profile: min
+
+exclude_paths:
+  - .venv/
+  - .ansible/
+  - ansible/collections/
+
+offline: true

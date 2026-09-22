@@ -12,7 +12,7 @@
   ansible.builtin.file:
     path: "{{ crypto_base_dir }}/{{ item }}"
     state: directory
-    mode: 0755
+    mode: "0755"
     owner: olivier
     group: olivier
   loop:
@@ -24,7 +24,7 @@
   copy:
     src: "rclone.sh"
     dest: "{{ crypto_base_dir }}/bin/"
-    mode: 0755
+    mode: "0755"
 
 - name: "install rclone script in crontab"
   ansible.builtin.cron:
@@ -34,4 +34,3 @@
     minute: "0"
     job: "{{ crypto_base_dir }}/bin/rclone.sh {{ item.provider }} {{ item.bucket }}"
   loop: "{{ rclone_jobs | default('[]') }}"
-

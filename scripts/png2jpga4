@@ -1,9 +1,9 @@
-#! /bin/bash
+#!/bin/bash
+set -euo pipefail
 
 for infile in "$@"
 do
-    id=$(magick identify "$infile")
-    format=$(echo ${id:${#infile}} | cut -d' ' -f1)
+    format=$(magick identify -format "%m" "$infile" 2>/dev/null || true)
     if [[ "$format" == "PNG" ]]; then
         outfile="$(basename "$infile" .png).jpg"
         echo magick convert -size 2480x3508 xc:white "$infile" -gravity center -composite -level 25%,75% -density 300 -page a4 -units PixelsPerInch -quality 70 "$outfile"

@@ -1,0 +1,11 @@
+---
+# Collections requises pour l'exécution des playbooks homecode
+collections:
+  - name: ansible.posix
+    version: "==1.5.4"
+
+  - name: community.general
+    version: "==9.5.0"
+
+  - name: community.crypto
+    version: "==2.22.0"

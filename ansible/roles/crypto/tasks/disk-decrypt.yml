@@ -31,4 +31,3 @@
   become: true
   command: vgchange -a y
   when: not luks_volume.stat.exists
-

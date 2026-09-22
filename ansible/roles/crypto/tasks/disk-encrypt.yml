@@ -36,7 +36,7 @@
   template:
     src: templates/encrypt-pass.j2
     dest: "{{ tmp.stdout }}"
- 
+
 - name: "encrypt disk"
   become: true
   shell: cat {{ tmp.stdout }} | cryptsetup luksFormat -v -c aes-xts-plain64 -h sha256 {{ luks_dev }}

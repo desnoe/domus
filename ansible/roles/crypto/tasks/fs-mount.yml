@@ -5,7 +5,7 @@
   ansible.builtin.file:
     path: "{{ crypto_base_dir }}"
     state: directory
-    mode: 0755
+    mode: "0755"
     owner: olivier
     group: olivier
 
@@ -77,7 +77,7 @@
   ansible.builtin.file:
     path: "{{ crypto_base_dir }}/sync"
     state: directory
-    mode: 0755
+    mode: "0755"
     owner: olivier
     group: olivier
 
@@ -96,7 +96,7 @@
   ansible.builtin.file:
     path: "{{ crypto_base_dir }}/snapshots"
     state: directory
-    mode: 0755
+    mode: "0755"
     owner: olivier
     group: olivier
 
@@ -105,7 +105,7 @@
   copy:
     src: "snapshot.sh"
     dest: "{{ crypto_base_dir }}/"
-    mode: 0755
+    mode: "0755"
 
 - name: "install snapshot script in crontab"
   ansible.builtin.cron:
@@ -114,4 +114,3 @@
     hour: "5"
     minute: "0"
     job: "{{ crypto_base_dir }}/snapshot.sh"
-

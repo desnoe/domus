@@ -11,18 +11,18 @@
 
 - name: "(re-)encrypt block device"
   when: wipe == True
-  include: disk-encrypt.yml
+  ansible.builtin.include_tasks: disk-encrypt.yml
 
 - name: "decrypt and open encrypted block device"
-  include: disk-decrypt.yml
+  ansible.builtin.include_tasks: disk-decrypt.yml
 
 - name: "(re-)set LVM2 volumes"
   when: wipe == True
-  include: lvm2-reset.yml
+  ansible.builtin.include_tasks: lvm2-reset.yml
 
 - name: "(re-)set partitions"
   when: wipe == True
-  include: fs-reset.yml
+  ansible.builtin.include_tasks: fs-reset.yml
 
 - name: "mount partitions"
-  include: fs-mount.yml
+  ansible.builtin.include_tasks: fs-mount.yml

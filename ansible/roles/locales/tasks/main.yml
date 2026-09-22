@@ -14,14 +14,14 @@
   copy:
     src: "locale"
     dest: "/etc/default/locale"
-    mode: 0644
+    mode: "0644"
 
 - name: "configure /etc/locale.gen"
   become: true
   copy:
     src: "locale.gen"
     dest: "/etc/locale.gen"
-    mode: 0644
+    mode: "0644"
 
 - name: "ensure en_US.UTF-8 locale exists"
   become: true
