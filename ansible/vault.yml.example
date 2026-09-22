@@ -1,0 +1,10 @@
+---
+# Template for expected variables in host_vars/<host>/vault.yml
+# This file serves as documentation and reference before encryption with ansible-vault.
+
+# Decryption passphrase for LUKS block device (/dev/sda or /dev/sdb)
+luks_pass: "CHANGE_ME_LUKS_PASSPHRASE"
+
+# (Optional) sha512crypt password hash for user olivier sudo account
+# Generated e.g. using: mkpasswd -m sha-512
+# user_password: "$6$..."

@@ -1,5 +1,5 @@
 ---
-# Configuration de ansible-lint pour homecode
+# Configuration for ansible-lint on homecode
 profile: min
 
 exclude_paths:
