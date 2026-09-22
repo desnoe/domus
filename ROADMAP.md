@@ -18,21 +18,24 @@ This document lists all identified improvement axes for the `homecode` repositor
 ## 🔴 Phase 1: Immediate Security & Secrets Management (High Priority)
 
 ### 1.1. User password encryption
-- [ ] Move plaintext password hashes from [`ansible/roles/sudo/tasks/main.yml`](ansible/roles/sudo/tasks/main.yml) into encrypted vault files (`vault.yml`).
-- [ ] Replace hardcoded hash with variable `user_password: "{{ vaulted_user_password }}"`.
+- [x] Move plaintext password hashes from [`ansible/roles/sudo/tasks/main.yml`](ansible/roles/sudo/tasks/main.yml) into encrypted vault files (`vault.yml`).
+- [x] Replace hardcoded hash with variable `password: "{{ user_password }}"` and enforce `no_log: true`.
 
 ### 1.2. LUKS encryption & decryption hardening
-- [ ] Remove temporary plaintext password file creation (`/tmp/encdisk.XXXXXXX`) in [`ansible/roles/crypto/tasks/disk-encrypt.yml`](ansible/roles/crypto/tasks/disk-encrypt.yml) and [`ansible/roles/crypto/tasks/disk-decrypt.yml`](ansible/roles/crypto/tasks/disk-decrypt.yml).
-- [ ] Use either `community.crypto.luks_device` module or direct standard input piping (`cryptsetup ... --key-file -`) with `no_log: true` to prevent secrets leaking to disk or logs.
+- [x] Remove temporary plaintext password file creation (`/tmp/encdisk.XXXXXXX`) in [`ansible/roles/crypto/tasks/disk-encrypt.yml`](ansible/roles/crypto/tasks/disk-encrypt.yml) and [`ansible/roles/crypto/tasks/disk-decrypt.yml`](ansible/roles/crypto/tasks/disk-decrypt.yml).
+- [x] Feed passphrases directly via standard input piping (`cryptsetup ... --key-file -`) with `no_log: true` to prevent secrets leaking to disk or logs.
+- [x] Delete obsolete Jinja template `ansible/roles/crypto/templates/encrypt-pass.j2`.
 
 ### 1.3. Sudoers configuration hardening
-- [ ] Replace direct modification of `/etc/sudoers` with a dedicated drop-in file in `/etc/sudoers.d/99-ansible-wheel`.
-- [ ] Enforce syntax validation `visudo -cf %s`.
+- [x] Replace direct modification of `/etc/sudoers` with a dedicated drop-in file in `/etc/sudoers.d/99-ansible-wheel`.
+- [x] Clean up any legacy `%wheel` rule in `/etc/sudoers`.
+- [x] Enforce syntax validation `visudo -cf %s`.
 
 ### 1.4. Rsync script safety checks
-- [ ] In [`scripts/rsync-mac-to-external-hdd.sh`](scripts/rsync-mac-to-external-hdd.sh), add a strict mount point check (`[ -d "$DST_DIR" ]`) to prevent filling internal macOS SSD if external drive is unmounted.
-- [ ] Replace hardcoded user home paths (`/Users/olivier/`) with `$HOME`.
-- [ ] Systematically ensure parent log directories exist (`mkdir -p "$(dirname "$LOGFILE")"`) prior to rsync execution.
+- [x] In [`scripts/rsync-mac-to-external-hdd.sh`](scripts/rsync-mac-to-external-hdd.sh), add a strict mount point check (`[ -d "$DST_DIR" ]`) to prevent filling internal macOS SSD if external drive is unmounted.
+- [x] Replace hardcoded user home paths (`/Users/olivier/`) with `$HOME`.
+- [x] Systematically ensure parent log directories exist (`mkdir -p "$LOGDIR"`) prior to rsync execution.
+
 
 ---
 
