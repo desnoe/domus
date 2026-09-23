@@ -1,5 +1,6 @@
 ---
-- hosts: all
+- name: Configure system base services and security
+  hosts: all
   roles:
     - apt
     - base
@@ -11,7 +12,8 @@
     - sudo
     - vim
 
-- hosts: crypto
+- name: Unlock encrypted storage and configure backup sync
+  hosts: crypto
   roles:
     - crypto
     - rclone

@@ -1,28 +1,27 @@
 ---
-
-- name: "install required packages"
+- name: Install required packages
   become: true
-  apt:
+  ansible.builtin.apt:
     state: present
     name:
       - cryptsetup
       - lvm2
-      - btrfs-tools
+      - btrfs-progs
 
-- name: "(re-)encrypt block device"
-  when: wipe == True
+- name: (re-)encrypt block device
+  when: wipe | default(false) | bool
   ansible.builtin.include_tasks: disk-encrypt.yml
 
-- name: "decrypt and open encrypted block device"
+- name: Decrypt and open encrypted block device
   ansible.builtin.include_tasks: disk-decrypt.yml
 
-- name: "(re-)set LVM2 volumes"
-  when: wipe == True
+- name: (re-)set LVM2 volumes
+  when: wipe | default(false) | bool
   ansible.builtin.include_tasks: lvm2-reset.yml
 
-- name: "(re-)set partitions"
-  when: wipe == True
+- name: (re-)set partitions
+  when: wipe | default(false) | bool
   ansible.builtin.include_tasks: fs-reset.yml
 
-- name: "mount partitions"
+- name: Mount partitions
   ansible.builtin.include_tasks: fs-mount.yml

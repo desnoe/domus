@@ -43,21 +43,21 @@ This document lists all identified improvement axes for the `homecode` repositor
 
 ### 2.1. Eliminate deprecated syntax and directives
 - [x] Replace deprecated `include:` directives with `ansible.builtin.include_tasks:` in [`ansible/roles/crypto/tasks/main.yml`](ansible/roles/crypto/tasks/main.yml).
-- [ ] Replace inefficient `with_items` loops on `apt` across all roles (`base`, `apt`, `htop`, `iptables`, `locales`, `ntp`, `vim`) with direct list arguments `name: [...]`.
-- [ ] Fix role inconsistency in `base`: copy [`ansible/roles/base/files/bashrc.root`](ansible/roles/base/files/bashrc.root) for root instead of standard user bashrc.
-- [ ] Add `become: true` to service activation task in [`ansible/roles/ntp/tasks/main.yml`](ansible/roles/ntp/tasks/main.yml).
-- [ ] Migrate fully to FQCNs (`ansible.builtin.*`, `ansible.posix.*`, `community.general.*`).
+- [x] Replace inefficient `with_items` loops on `apt` across all roles (`base`, `apt`, `htop`, `iptables`, `locales`, `ntp`, `vim`, `rclone`) with direct list arguments `name: [...]`.
+- [x] Fix role inconsistency in `base`: copy [`ansible/roles/base/files/bashrc.root`](ansible/roles/base/files/bashrc.root) for root instead of standard user bashrc.
+- [x] Add `become: true` to service activation task in [`ansible/roles/ntp/tasks/main.yml`](ansible/roles/ntp/tasks/main.yml).
+- [x] Migrate fully to FQCNs (`ansible.builtin.*`, `ansible.posix.*`, `community.general.*`).
 
 ### 2.2. Compatibility with Debian 11/12+
-- [ ] Replace obsolete transitional package `btrfs-tools` with `btrfs-progs` in [`ansible/roles/crypto/tasks/main.yml`](ansible/roles/crypto/tasks/main.yml).
-- [ ] Update `ntp` role to install `systemd-timesyncd` or `chrony` on Debian 12 (Bookworm).
+- [x] Replace obsolete transitional package `btrfs-tools` with `btrfs-progs` in [`ansible/roles/crypto/tasks/main.yml`](ansible/roles/crypto/tasks/main.yml).
+- [x] Update `ntp` role to install `systemd-timesyncd` or `chrony` on Debian 12 (Bookworm).
 
 ### 2.3. Simplify Btrfs mount logic
-- [ ] Eliminate temporary mounting and regex subvolume ID parsing in [`ansible/roles/crypto/tasks/fs-mount.yml`](ansible/roles/crypto/tasks/fs-mount.yml).
-- [ ] Use native standard Btrfs subvolume mounting by name: `opts: "subvol=sync"` and `opts: "subvol=snapshots"`.
+- [x] Eliminate temporary mounting and regex subvolume ID parsing in [`ansible/roles/crypto/tasks/fs-mount.yml`](ansible/roles/crypto/tasks/fs-mount.yml).
+- [x] Use native standard Btrfs subvolume mounting by name: `opts: "subvol=sync"` and `opts: "subvol=snapshots"`.
 
 ### 2.4. Clean up duplicate role execution
-- [ ] Resolve circular dependency between `rclone` and `crypto` in [`ansible/roles/rclone/meta/main.yml`](ansible/roles/rclone/meta/main.yml) and [`ansible/reconfigure-and-decrypt.yml`](ansible/reconfigure-and-decrypt.yml) to avoid executing crypto role twice.
+- [x] Resolve circular dependency between `rclone` and `crypto` in [`ansible/roles/rclone/meta/main.yml`](ansible/roles/rclone/meta/main.yml) and [`ansible/reconfigure-and-decrypt.yml`](ansible/reconfigure-and-decrypt.yml) to avoid executing crypto role twice.
 
 ---
 
@@ -84,7 +84,7 @@ This document lists all identified improvement axes for the `homecode` repositor
 - [ ] Set up GitHub Actions workflow (`.github/workflows/lint.yml`) to run `pre-commit` (`ansible-lint`, `yamllint`, `shellcheck`) on pull requests and commits.
 
 ### 4.3. Comprehensive repository documentation
-- [ ] Expand [`README.md`](README.md):
+- [x] Expand [`README.md`](README.md) and [`docs/ansible.md`](docs/ansible.md):
   - Detailed storage architecture (LUKS $\rightarrow$ LVM $\rightarrow$ Btrfs $\rightarrow$ Snapshots $\rightarrow$ Rclone).
   - Playbook usage guide (`bootstrap.yml`, `reconfigure-and-decrypt.yml`, `decrypt-only.yml`, `wipe-and-reencrypt.yml`).
   - Onboarding guide, vault management, and instructions for provisioning new hosts.

@@ -1,13 +1,12 @@
 ---
-
-- name: "install required packages"
+- name: Install required packages
   become: true
-  apt:
+  ansible.builtin.apt:
     state: present
     name:
       - rclone
 
-- name: "check bin/logs base dir"
+- name: Ensure bin and logs directories exist
   become: true
   ansible.builtin.file:
     path: "{{ crypto_base_dir }}/{{ item }}"
@@ -19,14 +18,14 @@
     - bin
     - logs
 
-- name: "copy snapshot script"
-  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
-  copy:
+- name: Copy rclone script
+  when: ansible_distribution in ['Debian', 'Ubuntu']
+  ansible.builtin.copy:
     src: "rclone.sh"
-    dest: "{{ crypto_base_dir }}/bin/"
+    dest: "{{ crypto_base_dir }}/bin/rclone.sh"
     mode: "0755"
 
-- name: "install rclone script in crontab"
+- name: Install rclone script in crontab
   ansible.builtin.cron:
     name: "rclone {{ item.provider }} {{ item.bucket }}"
     user: "olivier"

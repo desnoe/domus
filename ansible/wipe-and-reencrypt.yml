@@ -1,7 +1,7 @@
 ---
-
-- hosts: crypto
+- name: Wipe, re-encrypt, and format encrypted storage
+  hosts: crypto
   vars:
-    wipe: yes
+    wipe: true
   roles:
     - crypto

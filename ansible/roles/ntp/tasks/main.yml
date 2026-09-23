@@ -1,22 +1,25 @@
 ---
+- name: Set NTP package name
+  ansible.builtin.set_fact:
+    ntp_service_name: "{{ 'chrony' if (ansible_distribution == 'Debian' and (ansible_distribution_major_version | default('0') | int >= 12)) else 'ntp' }}"
 
-- name: "install list of base packages"
-  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+- name: Install NTP and timezone packages
+  when: ansible_distribution in ['Debian', 'Ubuntu']
   become: true
-  apt:
-    name: "{{ item }}"
+  ansible.builtin.apt:
     state: present
-  with_items:
-    - tzdata
-    - ntp
+    name:
+      - tzdata
+      - "{{ ntp_service_name }}"
 
-- name: "set timezone"
+- name: Set timezone
   become: true
-  timezone:
+  community.general.timezone:
     name: Europe/Paris
 
-- name: 'ensure NTP is running and enabled'
-  service:
-    name: ntp
+- name: Ensure NTP service is running and enabled
+  become: true
+  ansible.builtin.service:
+    name: "{{ ntp_service_name }}"
     state: started
     enabled: true

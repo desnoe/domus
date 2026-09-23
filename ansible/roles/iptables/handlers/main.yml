@@ -1,3 +1,4 @@
-- name: reload iptables
+---
+- name: Reload iptables
   become: true
-  command: bash -c "iptables -F && iptables -F -t nat && iptables -F -t mangle && iptables-restore < /etc/network/iptables.up.rules"
+  ansible.builtin.shell: "iptables -F && iptables -F -t nat && iptables -F -t mangle && iptables-restore < /etc/network/iptables.up.rules"

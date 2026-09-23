@@ -1,5 +1,5 @@
 ---
-
-- hosts: crypto
+- name: Decrypt and mount encrypted storage
+  hosts: crypto
   roles:
     - crypto

@@ -1,6 +1,5 @@
 ---
-
-- name: "check crypto base dir"
+- name: Check crypto base directory
   become: true
   ansible.builtin.file:
     path: "{{ crypto_base_dir }}"
@@ -9,70 +8,30 @@
     owner: olivier
     group: olivier
 
-- name: create temporary directory
-  ansible.builtin.tempfile:
-    state: directory
-  register: tmpdir
-  changed_when: false
-
-- name: check if fake fstab exists or not
+- name: Check if fake fstab exists
   ansible.builtin.stat:
     path: "{{ crypto_base_dir }}/.fakefstab"
   register: fakefstab
 
-- name: create fake fstab
+- name: Create fake fstab
   become: true
   ansible.builtin.file:
     state: touch
     path: "{{ crypto_base_dir }}/.fakefstab"
+    mode: "0644"
   when: not fakefstab.stat.exists
 
-- name: mount up the btrfs filesystem temporarily
+- name: Mount sync directory
   become: true
   ansible.posix.mount:
-    name: "{{ tmpdir.path }}"
+    path: "{{ crypto_base_dir }}/sync"
     src: /dev/vg_data/lv_data
     fstype: btrfs
     fstab: "{{ crypto_base_dir }}/.fakefstab"
-    state: mounted
-  changed_when: false
-
-- name: get btrfs subvolume list
-  become: true
-  command: btrfs subvolume list "{{ tmpdir.path }}"
-  register: btrfs_subvolumelist
-  changed_when: false
-
-- name: get btrfs subvolume IDs
-  set_fact:
-    btrfs_subvolumeid_sync: "{{ btrfs_subvolumelist.stdout | regex_search('ID (\\d+) .* sync$', '\\1', multiline=True) | first }}"
-    btrfs_subvolumeid_snapshots: "{{ btrfs_subvolumelist.stdout | regex_search('ID (\\d+) .* snapshots$', '\\1', multiline=True) | first }}"
-  changed_when: false
-
-- name: unmount the btrfs filesystem
-  become: true
-  ansible.posix.mount:
-    name: "{{ tmpdir.path }}"
-    state: unmounted
-  changed_when: false
-
-- name: remove temporary directory
-  ansible.builtin.file:
-    path: "{{ tmpdir.path }}"
-    state: absent
-  changed_when: false
-
-- name: "mount sync dir"
-  become: true
-  ansible.posix.mount:
-    name: "{{ crypto_base_dir }}/sync/"
-    src: /dev/vg_data/lv_data
-    fstype: btrfs
-    fstab: "{{ crypto_base_dir }}/.fakefstab"
-    opts: "noauto,subvolid={{ btrfs_subvolumeid_sync }}"
+    opts: "noauto,subvol=sync"
     state: mounted
 
-- name: "check sync base dir"
+- name: Ensure sync directory permissions
   become: true
   ansible.builtin.file:
     path: "{{ crypto_base_dir }}/sync"
@@ -81,17 +40,17 @@
     owner: olivier
     group: olivier
 
-- name: "mount snapshots dir"
+- name: Mount snapshots directory
   become: true
   ansible.posix.mount:
-    name: "{{ crypto_base_dir }}/snapshots/"
+    path: "{{ crypto_base_dir }}/snapshots"
     src: /dev/vg_data/lv_data
     fstype: btrfs
     fstab: "{{ crypto_base_dir }}/.fakefstab"
-    opts: "noauto,subvolid={{ btrfs_subvolumeid_snapshots }}"
+    opts: "noauto,subvol=snapshots"
     state: mounted
 
-- name: "check snapshots base dir"
+- name: Ensure snapshots directory permissions
   become: true
   ansible.builtin.file:
     path: "{{ crypto_base_dir }}/snapshots"
@@ -100,14 +59,14 @@
     owner: olivier
     group: olivier
 
-- name: "copy snapshot script"
-  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
-  copy:
+- name: Copy snapshot script
+  when: ansible_distribution in ['Debian', 'Ubuntu']
+  ansible.builtin.copy:
     src: "snapshot.sh"
-    dest: "{{ crypto_base_dir }}/"
+    dest: "{{ crypto_base_dir }}/snapshot.sh"
     mode: "0755"
 
-- name: "install snapshot script in crontab"
+- name: Install snapshot script in crontab
   ansible.builtin.cron:
     name: "snapshot data"
     user: "olivier"

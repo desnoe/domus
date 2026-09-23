@@ -1,22 +1,20 @@
 ---
-
-- name: "install required packages"
-  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+- name: Install required packages
+  when: ansible_distribution in ['Debian', 'Ubuntu']
   become: true
-  apt:
-    name: "{{ item }}"
+  ansible.builtin.apt:
+    name:
+      - htop
     state: present
-  with_items:
-    - htop
 
-- name: "check htop base config dir"
-  file:
+- name: Check htop base config dir
+  ansible.builtin.file:
     path: "~/.config/htop"
     state: directory
     mode: "0700"
 
-- name: "setup htoprc"
-  copy:
+- name: Setup htoprc
+  ansible.builtin.copy:
     src: "htoprc"
     dest: "~/.config/htop/htoprc"
     mode: "0644"

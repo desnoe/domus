@@ -1,16 +1,15 @@
 ---
-
-- name: "wipe and recreate the volume group"
+- name: Wipe and recreate the volume group
   become: true
   community.general.lvg:
-    force: yes
+    force: true
     vg: vg_data
     pvs: "/dev/mapper/{{ luks_name }}"
 
-- name: "wipe and recreate the logical volume"
+- name: Wipe and recreate the logical volume
   become: true
   community.general.lvol:
-    force: yes
+    force: true
     vg: vg_data
     lv: lv_data
     size: 100%FREE

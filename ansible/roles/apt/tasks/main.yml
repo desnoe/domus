@@ -1,16 +1,17 @@
-- name: "install list of base packages"
-  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+---
+- name: Install list of base packages
+  when: ansible_distribution in ['Debian', 'Ubuntu']
   become: true
-  apt:
+  ansible.builtin.apt:
     state: present
     name:
       - sudo
       - aptitude
 
-- name: "update repositories cache and upgrade"
-  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+- name: Update repositories cache and upgrade packages
+  when: ansible_distribution in ['Debian', 'Ubuntu']
   become: true
-  apt:
-    upgrade: 'yes'
-    update_cache: 'yes'
+  ansible.builtin.apt:
+    upgrade: true
+    update_cache: true
     cache_valid_time: 3600

@@ -1,23 +1,21 @@
 ---
-
-- name: "install required packages"
-  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+- name: Install vim package
+  when: ansible_distribution in ['Debian', 'Ubuntu']
   become: true
-  apt:
-    name: "{{ item }}"
+  ansible.builtin.apt:
+    name:
+      - vim
     state: present
-  with_items:
-    - vim
 
-- name: "setup .vimrc for root"
+- name: Setup .vimrc for root
   become: true
-  copy:
+  ansible.builtin.copy:
     src: "vimrc"
     dest: "/root/.vimrc"
     mode: "0644"
 
-- name: "setup .vimrc"
-  copy:
+- name: Setup .vimrc for user
+  ansible.builtin.copy:
     src: "vimrc"
     dest: "~/.vimrc"
     mode: "0644"
