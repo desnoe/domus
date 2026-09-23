@@ -111,6 +111,17 @@ uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/wipe-and-reenc
 
 ---
 
+## 🛠️ Utility Scripts (`scripts/`)
+
+The repository includes helper shell utilities for batch image processing via ImageMagick (`magick`):
+
+- **[`scripts/image-convert.sh`](scripts/image-convert.sh)**: Parameterized CLI supporting A4 canvas centering (`--a4`), directory placement (`--alongside`), and quality adjustments.
+- **[`scripts/png2jpg.sh`](scripts/png2jpg.sh)**: Converts PNG images to optimized JPEG.
+- **[`scripts/png2jpga4.sh`](scripts/png2jpga4.sh)**: Centers PNG images onto a 300 DPI A4 white canvas.
+- **[`scripts/scan2jpg.sh`](scripts/scan2jpg.sh)**: Converts image scans alongside original source paths.
+
+---
+
 ## 🧪 Code Quality & Pre-commit
 
 All contributions must pass the full pre-commit test suite before committing:

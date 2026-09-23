@@ -75,16 +75,17 @@ This document lists all identified improvement axes for the `homecode` repositor
 ## 🔵 Phase 4: Script Refactoring, CI & Documentation
 
 ### 4.1. ImageMagick script refactoring
-- [ ] Standardize script extension: rename [`scripts/png2jpga4`](scripts/png2jpga4) to `png2jpga4.sh`.
+- [x] Standardize script extension: rename [`scripts/png2jpga4`](scripts/png2jpga4.sh) to `png2jpga4.sh`.
 - [x] Extract image formats reliably via `magick identify -format "%m" "$infile"`.
 - [x] Add bash strict mode (`set -euo pipefail`) across all scripts.
-- [ ] *(Optional)* Consolidate image conversion scripts into a single parameterized CLI utility.
+- [x] Consolidate image conversion scripts into a single parameterized CLI utility ([`scripts/image-convert.sh`](scripts/image-convert.sh)).
 
 ### 4.2. CI automation
-- [ ] Set up GitHub Actions workflow (`.github/workflows/lint.yml`) to run `pre-commit` (`ansible-lint`, `yamllint`, `shellcheck`) on pull requests and commits.
+- [ ] *(Skipped per user request)* Set up GitHub Actions workflow (`.github/workflows/lint.yml`) to run `pre-commit` (`ansible-lint`, `yamllint`, `shellcheck`) on pull requests and commits.
 
 ### 4.3. Comprehensive repository documentation
 - [x] Expand [`README.md`](README.md) and [`docs/ansible.md`](docs/ansible.md):
   - Detailed storage architecture (LUKS $\rightarrow$ LVM $\rightarrow$ Btrfs $\rightarrow$ Snapshots $\rightarrow$ Rclone).
   - Playbook usage guide (`bootstrap.yml`, `reconfigure-and-decrypt.yml`, `decrypt-only.yml`, `wipe-and-reencrypt.yml`).
   - Onboarding guide, vault management, and instructions for provisioning new hosts.
+  - Utility scripts reference (`scripts/image-convert.sh`).
