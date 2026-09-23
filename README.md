@@ -9,8 +9,7 @@ Infrastructure as Code (IaC) repository for provisioning, hardening, and managin
 - **Host Provisioning**: Bootstrap minimal Debian systems with automated user management (`olivier`), SSH hardening, and sudo rights.
 - **Layered Storage Security**:
   - **LUKS**: Block-level encryption with AES-256 (`luks_pass`).
-  - **LVM2**: Flexible volume grouping on top of decrypted LUKS containers.
-  - **Btrfs**: Filesystem management with independent subvolumes (`sync` and `snapshots`).
+  - **Btrfs**: Filesystem management directly on decrypted LUKS containers with declarative subvolumes (`sync` and `snapshots`), transparent zstd compression, and automated fstab integration.
 - **Automated Backups**:
   - Daily read-only Btrfs snapshots scheduled via cron at 05:00.
   - Multi-cloud synchronization via `rclone` (OneDrive and S3) scheduled at 04:00.
@@ -96,7 +95,7 @@ uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/decrypt-only.
 ```
 
 ### 4. Wipe & Re-encrypt Storage (Destructive)
-Unmounts, wipes existing LUKS containers, re-formats, and re-creates LVM and Btrfs subvolumes:
+Unmounts, wipes existing LUKS containers, re-formats, and re-creates declarative Btrfs subvolumes:
 ```bash
 uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/wipe-and-reencrypt.yml
 ```

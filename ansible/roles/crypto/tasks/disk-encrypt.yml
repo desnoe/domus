@@ -1,25 +1,15 @@
 ---
-- name: Unmount sync
+- name: Unmount Btrfs subvolumes
   become: true
   ansible.posix.mount:
-    path: "{{ crypto_base_dir }}/sync"
+    path: "{{ item.mount_point }}"
     state: unmounted
-
-- name: Unmount snapshots
-  become: true
-  ansible.posix.mount:
-    path: "{{ crypto_base_dir }}/snapshots"
-    state: unmounted
+  loop: "{{ btrfs_subvolumes }}"
 
 - name: Check if encrypted volume exists or not
   ansible.builtin.stat:
     path: "/dev/mapper/{{ luks_name }}"
   register: luks_volume
-
-- name: Close volume group
-  become: true
-  ansible.builtin.command: lvchange -an vg_data
-  when: luks_volume.stat.exists
 
 - name: Close encrypted disk
   become: true

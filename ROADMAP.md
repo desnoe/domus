@@ -85,7 +85,7 @@ This document lists all identified improvement axes for the `homecode` repositor
 
 ### 4.3. Comprehensive repository documentation
 - [x] Expand [`README.md`](README.md) and [`docs/ansible.md`](docs/ansible.md):
-  - Detailed storage architecture (LUKS $\rightarrow$ LVM $\rightarrow$ Btrfs $\rightarrow$ Snapshots $\rightarrow$ Rclone).
+  - Detailed storage architecture (LUKS $\rightarrow$ Btrfs $\rightarrow$ Snapshots $\rightarrow$ Rclone).
   - Playbook usage guide (`bootstrap.yml`, `reconfigure-and-decrypt.yml`, `decrypt-only.yml`, `wipe-and-reencrypt.yml`).
   - Onboarding guide, vault management, and instructions for provisioning new hosts.
   - Utility scripts reference (`scripts/image-convert.sh`).

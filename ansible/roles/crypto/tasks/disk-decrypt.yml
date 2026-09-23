@@ -11,8 +11,3 @@
     cmd: "cryptsetup luksOpen {{ luks_dev }} {{ luks_name }} --key-file -"
     stdin: "{{ luks_pass }}"
   when: not luks_volume.stat.exists
-
-- name: Activate all known volume groups in the system
-  become: true
-  ansible.builtin.command: vgchange -a y
-  when: not luks_volume.stat.exists

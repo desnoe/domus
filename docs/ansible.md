@@ -11,9 +11,7 @@ The infrastructure runs on Debian hosts (`lab` and `live` environments). For hos
 ```mermaid
 flowchart TD
     Disk["Physical Block Device (e.g. /dev/sda, /dev/sdb)"] -->|LUKS AES-256 (luks_pass)| LUKS["Decrypted Mapper (/dev/mapper/crypt_sda)"]
-    LUKS -->|LVM Physical Volume| VG["LVM Volume Group (vg_data)"]
-    VG -->|LVM Logical Volume| LV["LVM Logical Volume (lv_data)"]
-    LV -->|Btrfs Filesystem| RootBtrfs["Btrfs Root"]
+    LUKS -->|Btrfs Filesystem (compress=zstd:3,noatime)| RootBtrfs["Btrfs Root"]
     RootBtrfs --> SubvolSync["Subvolume: sync (Mounted at ~/crypto/sync)"]
     RootBtrfs --> SubvolSnap["Subvolume: snapshots (Mounted at ~/crypto/snapshots)"]
     Cloud["Cloud Storage (OneDrive, S3)"] -->|Staggered Rclone Cron (04:00, 04:15, ...)| SubvolSync
@@ -122,7 +120,7 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 ### 4. `ansible/wipe-and-reencrypt.yml`
 - **Purpose**: Destructive playbook used when provisioning a new drive or resetting storage.
 - **Variables**: Sets `wipe: true`.
-- **Action**: Unmounts filesystems, wipes previous LUKS headers, re-encrypts the block device, re-creates LVM volume group and logical volumes, creates fresh Btrfs subvolumes (`sync`, `snapshots`), and mounts them.
+- **Action**: Unmounts filesystems, wipes previous LUKS headers, re-encrypts the block device, formats fresh Btrfs filesystem on the decrypted device, creates declarative subvolumes (`sync`, `snapshots`), and mounts them in `/etc/fstab`.
 - **Usage**:
   ```bash
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/wipe-and-reencrypt.yml
@@ -136,7 +134,7 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 | :--- | :--- | :--- |
 | **`apt`** | Ensures `sudo` and package tools are installed; upgrades system package cache. | `apt` cache, system packages |
 | **`base`** | Installs common utilities (`curl`, `rsync`, `tree`, `wget`, etc.), sets `/etc/hostname`, and installs customized `.bashrc`. | `/etc/hostname`, `~/.bashrc`, `/root/.bashrc` |
-| **`crypto`** | Manages the full encrypted storage stack: LUKS format/open via memory/stdin, LVM volumes, Btrfs subvolumes (`sync`, `snapshots`), and daily snapshot cron job with automated retention (7 daily + 4 weekly). | `/dev/mapper/<luks_name>`, `vg_data`, `lv_data`, `snapshot.sh` |
+| **`crypto`** | Manages the full encrypted storage stack: LUKS format/open via memory/stdin, direct Btrfs formatting on `/dev/mapper/<luks_name>`, declarative subvolumes (`sync`, `snapshots`) with zstd compression and fstab integration, and daily snapshot cron job with automated retention (7 daily + 4 weekly). | `/dev/mapper/<luks_name>`, `/etc/fstab`, `snapshot.sh` |
 | **`htop`** | Installs `htop` and user configuration. | `~/.config/htop/htoprc` |
 | **`iptables`** | Sets up packet filtering firewall rules and restore handler. | `/etc/network/iptables.up.rules` |
 | **`locales`** | Configures system locales (`en_US.UTF-8`, `fr_FR.UTF-8`). | `/etc/default/locale`, `/etc/locale.gen` |

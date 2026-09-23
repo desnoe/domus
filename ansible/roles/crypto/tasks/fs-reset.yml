@@ -1,43 +1,7 @@
 ---
-- name: Create a btrfs filesystem
+- name: Format Btrfs filesystem on decrypted LUKS device
   become: true
   community.general.filesystem:
     fstype: btrfs
-    dev: /dev/vg_data/lv_data
-
-- name: Create temporary fstab
-  ansible.builtin.tempfile:
-    state: file
-  register: tmpfstab
-
-- name: Mount the btrfs filesystem temporarily
-  become: true
-  ansible.posix.mount:
-    path: "{{ crypto_base_dir }}"
-    src: /dev/vg_data/lv_data
-    fstype: btrfs
-    fstab: "{{ tmpfstab.path }}"
-    state: mounted
-
-- name: Create sync subvolume
-  become: true
-  ansible.builtin.command:
-    chdir: "{{ crypto_base_dir }}"
-    cmd: btrfs subvolume create sync
-
-- name: Create snapshots subvolume
-  become: true
-  ansible.builtin.command:
-    chdir: "{{ crypto_base_dir }}"
-    cmd: btrfs subvolume create snapshots
-
-- name: Unmount the btrfs filesystem
-  become: true
-  ansible.posix.mount:
-    path: "{{ crypto_base_dir }}"
-    state: unmounted
-
-- name: Remove temporary fstab file
-  ansible.builtin.file:
-    path: "{{ tmpfstab.path }}"
-    state: absent
+    dev: "/dev/mapper/{{ luks_name }}"
+    force: true

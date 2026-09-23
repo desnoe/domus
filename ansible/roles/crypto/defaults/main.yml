@@ -1,3 +1,10 @@
 ---
+wipe: false
 
-wipe: no
+btrfs_default_mount_options: "noauto,nofail,compress=zstd:3,noatime"
+
+btrfs_subvolumes:
+  - name: sync
+    mount_point: "{{ crypto_base_dir }}/sync"
+  - name: snapshots
+    mount_point: "{{ crypto_base_dir }}/snapshots"

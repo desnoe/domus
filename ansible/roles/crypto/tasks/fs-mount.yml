@@ -1,5 +1,5 @@
 ---
-- name: Check crypto base directory
+- name: Ensure crypto base directory exists
   become: true
   ansible.builtin.file:
     path: "{{ crypto_base_dir }}"
@@ -8,56 +8,50 @@
     owner: olivier
     group: olivier
 
-- name: Check if fake fstab exists
-  ansible.builtin.stat:
-    path: "{{ crypto_base_dir }}/.fakefstab"
-  register: fakefstab
+- name: Ensure Btrfs subvolumes exist
+  become: true
+  community.general.btrfs_subvolume:
+    name: "{{ item.name }}"
+    filesystem_device: "/dev/mapper/{{ luks_name }}"
+    automount: true
+    state: present
+  loop: "{{ btrfs_subvolumes }}"
 
-- name: Create fake fstab
+- name: Ensure subvolume mount directories exist
   become: true
   ansible.builtin.file:
-    state: touch
-    path: "{{ crypto_base_dir }}/.fakefstab"
-    mode: "0644"
-  when: not fakefstab.stat.exists
+    path: "{{ item.mount_point }}"
+    state: directory
+    mode: "{{ item.mode | default('0755') }}"
+    owner: "{{ item.owner | default('olivier') }}"
+    group: "{{ item.group | default('olivier') }}"
+  loop: "{{ btrfs_subvolumes }}"
 
-- name: Mount sync directory
+- name: Mount Btrfs subvolumes in fstab
   become: true
   ansible.posix.mount:
-    path: "{{ crypto_base_dir }}/sync"
-    src: /dev/vg_data/lv_data
+    path: "{{ item.mount_point }}"
+    src: "/dev/mapper/{{ luks_name }}"
     fstype: btrfs
-    fstab: "{{ crypto_base_dir }}/.fakefstab"
-    opts: "noauto,subvol=sync"
+    opts: "{{ item.opts | default(btrfs_default_mount_options + ',subvol=' + item.name) }}"
     state: mounted
+  loop: "{{ btrfs_subvolumes }}"
 
-- name: Ensure sync directory permissions
+- name: Ensure subvolume permissions after mounting
   become: true
   ansible.builtin.file:
-    path: "{{ crypto_base_dir }}/sync"
+    path: "{{ item.mount_point }}"
     state: directory
-    mode: "0755"
-    owner: olivier
-    group: olivier
+    mode: "{{ item.mode | default('0755') }}"
+    owner: "{{ item.owner | default('olivier') }}"
+    group: "{{ item.group | default('olivier') }}"
+  loop: "{{ btrfs_subvolumes }}"
 
-- name: Mount snapshots directory
-  become: true
-  ansible.posix.mount:
-    path: "{{ crypto_base_dir }}/snapshots"
-    src: /dev/vg_data/lv_data
-    fstype: btrfs
-    fstab: "{{ crypto_base_dir }}/.fakefstab"
-    opts: "noauto,subvol=snapshots"
-    state: mounted
-
-- name: Ensure snapshots directory permissions
+- name: Remove legacy fake fstab file if present
   become: true
   ansible.builtin.file:
-    path: "{{ crypto_base_dir }}/snapshots"
-    state: directory
-    mode: "0755"
-    owner: olivier
-    group: olivier
+    path: "{{ crypto_base_dir }}/.fakefstab"
+    state: absent
 
 - name: Copy snapshot script
   when: ansible_distribution in ['Debian', 'Ubuntu']

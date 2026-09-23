@@ -5,7 +5,6 @@
     state: present
     name:
       - cryptsetup
-      - lvm2
       - btrfs-progs
 
 - name: (re-)encrypt block device
@@ -15,13 +14,9 @@
 - name: Decrypt and open encrypted block device
   ansible.builtin.include_tasks: disk-decrypt.yml
 
-- name: (re-)set LVM2 volumes
-  when: wipe | default(false) | bool
-  ansible.builtin.include_tasks: lvm2-reset.yml
-
-- name: (re-)set partitions
+- name: (re-)set filesystem
   when: wipe | default(false) | bool
   ansible.builtin.include_tasks: fs-reset.yml
 
-- name: Mount partitions
+- name: Mount Btrfs subvolumes
   ansible.builtin.include_tasks: fs-mount.yml
