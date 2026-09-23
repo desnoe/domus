@@ -29,7 +29,9 @@
   ansible.builtin.cron:
     name: "rclone {{ item.provider }} {{ item.bucket }}"
     user: "olivier"
-    hour: "4"
-    minute: "0"
+    hour: "{{ item.hour | default(4 + ((idx * 15) // 60)) | string }}"
+    minute: "{{ item.minute | default((idx * 15) % 60) | string }}"
     job: "{{ crypto_base_dir }}/bin/rclone.sh {{ item.provider }} {{ item.bucket }}"
   loop: "{{ rclone_jobs | default('[]') }}"
+  loop_control:
+    index_var: idx

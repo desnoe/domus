@@ -64,11 +64,11 @@ This document lists all identified improvement axes for the `homecode` repositor
 ## 🟢 Phase 3: Data Maintenance & Retention
 
 ### 3.1. Btrfs snapshot retention policy
-- [ ] Implement an automated rotation and cleanup mechanism in [`ansible/roles/crypto/files/snapshot.sh`](ansible/roles/crypto/files/snapshot.sh) (e.g. keep 7 daily, 4 weekly, and prune older snapshots).
+- [x] Implement an automated rotation and cleanup mechanism in [`ansible/roles/crypto/files/snapshot.sh`](ansible/roles/crypto/files/snapshot.sh) (e.g. keep 7 daily, 4 weekly, and prune older snapshots).
 
 ### 3.2. Stagger and prune rclone backups
-- [ ] Stagger cron execution times across buckets (`rclone_jobs`) instead of triggering all at 04:00.
-- [ ] Implement automatic cleanup for old log files in [`ansible/roles/rclone/files/rclone.sh`](ansible/roles/rclone/files/rclone.sh) (30-day retention).
+- [x] Stagger cron execution times across buckets (`rclone_jobs`) instead of triggering all at 04:00.
+- [x] Implement automatic cleanup for old log files in [`ansible/roles/rclone/files/rclone.sh`](ansible/roles/rclone/files/rclone.sh) (30-day retention).
 
 ---
 

@@ -16,8 +16,8 @@ flowchart TD
     LV -->|Btrfs Filesystem| RootBtrfs["Btrfs Root"]
     RootBtrfs --> SubvolSync["Subvolume: sync (Mounted at ~/crypto/sync)"]
     RootBtrfs --> SubvolSnap["Subvolume: snapshots (Mounted at ~/crypto/snapshots)"]
-    SubvolSync -->|Daily Snapshot Cron (05:00)| SubvolSnap
-    SubvolSync -->|Daily Rclone Cron (04:00)| Cloud["Cloud Storage (OneDrive, S3)"]
+    Cloud["Cloud Storage (OneDrive, S3)"] -->|Staggered Rclone Cron (04:00, 04:15, ...)| SubvolSync
+    SubvolSync -->|Daily Snapshot Cron (05:00, 7-daily + 4-weekly retention)| SubvolSnap
 ```
 
 ---
@@ -136,12 +136,12 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 | :--- | :--- | :--- |
 | **`apt`** | Ensures `sudo` and package tools are installed; upgrades system package cache. | `apt` cache, system packages |
 | **`base`** | Installs common utilities (`curl`, `rsync`, `tree`, `wget`, etc.), sets `/etc/hostname`, and installs customized `.bashrc`. | `/etc/hostname`, `~/.bashrc`, `/root/.bashrc` |
-| **`crypto`** | Manages the full encrypted storage stack: LUKS format/open via memory/stdin, LVM volumes, Btrfs subvolumes (`sync`, `snapshots`), and daily snapshot cron job. | `/dev/mapper/<luks_name>`, `vg_data`, `lv_data`, `snapshot.sh` |
+| **`crypto`** | Manages the full encrypted storage stack: LUKS format/open via memory/stdin, LVM volumes, Btrfs subvolumes (`sync`, `snapshots`), and daily snapshot cron job with automated retention (7 daily + 4 weekly). | `/dev/mapper/<luks_name>`, `vg_data`, `lv_data`, `snapshot.sh` |
 | **`htop`** | Installs `htop` and user configuration. | `~/.config/htop/htoprc` |
 | **`iptables`** | Sets up packet filtering firewall rules and restore handler. | `/etc/network/iptables.up.rules` |
 | **`locales`** | Configures system locales (`en_US.UTF-8`, `fr_FR.UTF-8`). | `/etc/default/locale`, `/etc/locale.gen` |
-| **`ntp`** | Sets timezone (`Europe/Paris`) and configures time synchronization. | `tzdata`, `ntp` service |
-| **`rclone`** | Installs `rclone`, sets up sync wrapper script (`rclone.sh`), and configures cron jobs for scheduled cloud backups. | `rclone.sh`, user crontab |
+| **`ntp`** | Sets timezone (`Europe/Paris`) and configures time synchronization (`chrony` on Debian 12+, `ntp` on Debian <= 11). | `tzdata`, `chrony`/`ntp` service |
+| **`rclone`** | Installs `rclone`, sets up sync wrapper script (`rclone.sh` with 30-day log rotation), and configures staggered cron jobs for scheduled cloud backups. | `rclone.sh`, user crontab |
 | **`sshd`** | Hardens SSH configuration (disables root login, disables password authentication) and manages `authorized_keys`. | `/etc/ssh/sshd_config`, `~/.ssh/authorized_keys` |
 | **`sudo`** | Creates `wheel` group, configures `/etc/sudoers.d/99-ansible-wheel` (validated via `visudo`), and creates user `olivier` with `user_password`. | `/etc/sudoers.d/99-ansible-wheel`, `/etc/passwd` |
 | **`vim`** | Installs `vim` and provisions `.vimrc` for regular user and root. | `~/.vimrc`, `/root/.vimrc` |
