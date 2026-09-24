@@ -6,10 +6,10 @@ Infrastructure as Code (IaC) repository for provisioning, hardening, and managin
 
 ## 📌 Features & Architecture Overview
 
-- **Host Provisioning**: Bootstrap minimal Debian systems with automated user management (`olivier`), SSH hardening, and sudo rights.
+- **Host Provisioning**: Bootstrap minimal Debian systems with automated user management (`ansible_user`), SSH hardening, and sudo rights.
 - **Layered Storage Security**:
-  - **LUKS**: Block-level encryption with AES-256 (`luks_pass`).
-  - **Btrfs**: Filesystem management directly on decrypted LUKS containers with declarative subvolumes (`sync` and `snapshots`), transparent zstd compression, and automated fstab integration.
+  - **LUKS**: Block-level encryption with AES-256 (`luks_pass`) on each member device.
+  - **Btrfs**: Filesystem management directly on decrypted LUKS containers with native RAID1 mirroring for multi-device pools, declarative subvolumes (`sync` and `snapshots`), transparent zstd compression, and automated fstab integration.
 - **Automated Backups**:
   - Daily read-only Btrfs snapshots scheduled via cron at 05:00.
   - Multi-cloud synchronization via `rclone` (OneDrive and S3) scheduled at 04:00.
@@ -51,12 +51,12 @@ The repository uses a clear variable precedence structure:
 
 | Variable Type | Location | Purpose | Examples |
 | :--- | :--- | :--- | :--- |
-| **Global Defaults** | `ansible/envs/<env>/group_vars/all/main.yml` | Common across all hosts | `crypto_base_dir`, `ansible_python_interpreter` |
-| **Host Variables** | `ansible/envs/<env>/host_vars/<host>/main.yml` | Device layout & backup targets | `luks_dev`, `luks_name`, `rclone_jobs` |
+| **Global Defaults** | `ansible/envs/<env>/group_vars/all/main.yml` | Common across all hosts | `crypto_base_dir`, `ansible_user` |
+| **Host Variables** | `ansible/envs/<env>/host_vars/<host>/main.yml` | Device layout & backup targets | `crypto_disks`, `rclone_jobs` |
 | **Encrypted Secrets** | `ansible/envs/<env>/host_vars/<host>/vault.yml` | Passphrases & sensitive hashes | `luks_pass`, `user_password` |
 
 ### User Password (`user_password`)
-The `user_password` variable holds the `sha512crypt` password hash for the `olivier` user account:
+The `user_password` variable holds the `sha512crypt` password hash for the primary user account (`ansible_user`):
 - It is defined in each host's encrypted **`ansible/envs/<env>/host_vars/<host>/vault.yml`**.
 - It is consumed by the **`sudo`** role (`ansible/roles/sudo/tasks/main.yml`) with `no_log: true`.
 - An unencrypted reference template is provided in [`ansible/vault.yml.example`](ansible/vault.yml.example).
@@ -100,11 +100,18 @@ Unmounts, wipes existing LUKS containers, re-formats, and re-creates declarative
 uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/wipe-and-reencrypt.yml
 ```
 
+### 5. Check Storage and System Health (Read-Only)
+Inspects LUKS encryption status, header backup presence, Btrfs allocation/compression, and snapshots:
+```bash
+uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml
+```
+
 ---
 
 ## 📚 Documentation & Guidelines
 
 - **[Detailed Ansible Architecture & Roles Guide](docs/ansible.md)**: Deep dive into all playbooks, roles, and storage layout.
+- **[Disaster Recovery & Storage Operations Guide](docs/disaster-recovery.md)**: Step-by-step procedures for emergency recovery, file restoration, and LUKS header repair.
 - **[AI Agent & Contributor Guidelines](AGENTS.md)**: Language policy (mandatory English), coding standards, and pre-commit rules.
 
 ---

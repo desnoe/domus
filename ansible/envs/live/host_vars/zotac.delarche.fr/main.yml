@@ -1,2 +1,10 @@
-luks_dev: /dev/sda
-luks_name: crypt_sda
+---
+crypto_disks:
+  - name: data
+    devices:
+      - /dev/sda
+
+snapshot_jobs:
+  - name: data
+    source: "{{ crypto_base_dir }}/data/sync"
+    destination: "{{ crypto_base_dir }}/data/snapshots"

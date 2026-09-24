@@ -5,6 +5,10 @@
 # Decryption passphrase for LUKS block device (/dev/sda or /dev/sdb)
 luks_pass: "CHANGE_ME_LUKS_PASSPHRASE"
 
-# sha512crypt password hash for user olivier sudo account
+# sha512crypt password hash for ansible_user sudo account
 # Generated e.g. using: python3 -c 'import crypt, secrets; print(crypt.crypt("my_password", crypt.mksalt(crypt.METHOD_SHA512)))'
 user_password: "$6$..."
+
+# Sudo privilege escalation password
+# Used by Ansible during connection/bootstrap when passwordless sudo is not yet active
+ansible_become_password: "CHANGE_ME_SUDO_PASSWORD"

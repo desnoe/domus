@@ -1,0 +1,51 @@
+---
+- name: "Set operational facts for disk: {{ disk.name }}"
+  ansible.builtin.set_fact:
+    disk_name: "{{ disk.name }}"
+    disk_devices: "{{ disk.devices }}"
+    disk_passphrase: "{{ disk.passphrase | default(luks_pass) }}"
+    disk_base_mount: "{{ disk.mount_point | default(crypto_base_dir + '/' + disk.name) }}"
+    disk_subvolumes: "{{ disk.subvolumes | default(btrfs_default_subvolumes) }}"
+
+- name: "Unmount Btrfs subvolumes before wipe: {{ disk_name }}"
+  when: wipe | default(false) | bool
+  become: true
+  ansible.posix.mount:
+    path: "{{ item.mount_point | default(disk_base_mount + '/' + item.name) }}"
+    state: unmounted
+  loop: "{{ disk_subvolumes }}"
+
+- name: "(re-)encrypt member devices: {{ disk_name }}"
+  when: wipe | default(false) | bool
+  ansible.builtin.include_tasks: disk-encrypt.yml
+  loop: "{{ disk_devices }}"
+  loop_control:
+    loop_var: dev_item
+    index_var: dev_idx
+
+- name: "Decrypt and open member devices: {{ disk_name }}"
+  ansible.builtin.include_tasks: disk-decrypt.yml
+  loop: "{{ disk_devices }}"
+  loop_control:
+    loop_var: dev_item
+    index_var: dev_idx
+
+- name: "Scan for multi-device Btrfs pools: {{ disk_name }}"
+  become: true
+  ansible.builtin.command:
+    cmd: "btrfs device scan"
+  changed_when: false
+
+- name: "Backup LUKS headers for member devices: {{ disk_name }}"
+  ansible.builtin.include_tasks: header-backup.yml
+  loop: "{{ disk_devices }}"
+  loop_control:
+    loop_var: dev_item
+    index_var: dev_idx
+
+- name: "(re-)set filesystem: {{ disk_name }}"
+  when: wipe | default(false) | bool
+  ansible.builtin.include_tasks: fs-reset.yml
+
+- name: "Mount Btrfs subvolumes: {{ disk_name }}"
+  ansible.builtin.include_tasks: fs-mount.yml

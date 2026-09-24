@@ -1,13 +1,13 @@
 ---
-- name: Check if encrypted volume exists or not
+- name: "Check if encrypted volume exists: {{ disk_name }}-{{ dev_idx }}"
   ansible.builtin.stat:
-    path: "/dev/mapper/{{ luks_name }}"
+    path: "/dev/mapper/{{ disk_name }}-{{ dev_idx }}"
   register: luks_volume
 
-- name: Open LUKS encrypted device
+- name: "Open LUKS encrypted device: {{ dev_item }}"
   become: true
   no_log: true
   ansible.builtin.command:
-    cmd: "cryptsetup luksOpen {{ luks_dev }} {{ luks_name }} --key-file -"
-    stdin: "{{ luks_pass }}"
+    cmd: "cryptsetup luksOpen {{ dev_item }} {{ disk_name }}-{{ dev_idx }} --key-file -"
+    stdin: "{{ disk_passphrase }}"
   when: not luks_volume.stat.exists

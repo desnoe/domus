@@ -1,24 +1,27 @@
 ---
-- name: Unmount Btrfs subvolumes
+- name: "Identify any active mapper on device: {{ dev_item }}"
   become: true
-  ansible.posix.mount:
-    path: "{{ item.mount_point }}"
-    state: unmounted
-  loop: "{{ btrfs_subvolumes }}"
+  ansible.builtin.shell:
+    cmd: "lsblk -rno NAME,TYPE {{ dev_item }} | awk '$2 == \"crypt\" {print $1}'"
+  register: active_crypt_holders
+  changed_when: false
 
-- name: Check if encrypted volume exists or not
-  ansible.builtin.stat:
-    path: "/dev/mapper/{{ luks_name }}"
-  register: luks_volume
-
-- name: Close encrypted disk
+- name: "Close any active encrypted mapper on device: {{ dev_item }}"
   become: true
-  ansible.builtin.command: "cryptsetup luksClose /dev/mapper/{{ luks_name }}"
-  when: luks_volume.stat.exists
+  ansible.builtin.command:
+    cmd: "cryptsetup luksClose {{ item }}"
+  loop: "{{ active_crypt_holders.stdout_lines }}"
+  when: active_crypt_holders.stdout_lines | length > 0
 
-- name: Format LUKS encrypted device
+- name: "Format LUKS encrypted device: {{ dev_item }}"
   become: true
   no_log: true
   ansible.builtin.command:
-    cmd: "cryptsetup luksFormat -q -v -c aes-xts-plain64 -h sha256 {{ luks_dev }} --key-file -"
-    stdin: "{{ luks_pass }}"
+    cmd: "cryptsetup luksFormat -q -v -c aes-xts-plain64 -h sha256 {{ dev_item }} --key-file -"
+    stdin: "{{ disk_passphrase }}"
+
+- name: "Remove stale LUKS header backup if wiping: {{ disk_name }}-{{ dev_idx }}"
+  become: true
+  ansible.builtin.file:
+    path: "/var/backups/luks/luks-header-{{ disk_name }}-{{ dev_idx }}.img"
+    state: absent

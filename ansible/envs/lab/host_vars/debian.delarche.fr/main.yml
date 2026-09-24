@@ -1,5 +1,13 @@
-luks_dev: /dev/sdb
-luks_name: crypt_sdb
+---
+crypto_disks:
+  - name: data
+    devices:
+      - /dev/disk/by-id/ata-debian-1_SSD_GQ84JJWKHCDM5B354NNT
+
+snapshot_jobs:
+  - name: data
+    source: "{{ crypto_base_dir }}/data/sync"
+    destination: "{{ crypto_base_dir }}/data/snapshots"
 
 rclone_jobs:
   - provider: onedrive

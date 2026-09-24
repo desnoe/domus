@@ -1,5 +1,6 @@
 ---
-- name: Install required packages
+- name: Install required storage packages
+  when: (crypto_disks | default([])) | length > 0
   become: true
   ansible.builtin.apt:
     state: present
@@ -7,16 +8,8 @@
       - cryptsetup
       - btrfs-progs
 
-- name: (re-)encrypt block device
-  when: wipe | default(false) | bool
-  ansible.builtin.include_tasks: disk-encrypt.yml
-
-- name: Decrypt and open encrypted block device
-  ansible.builtin.include_tasks: disk-decrypt.yml
-
-- name: (re-)set filesystem
-  when: wipe | default(false) | bool
-  ansible.builtin.include_tasks: fs-reset.yml
-
-- name: Mount Btrfs subvolumes
-  ansible.builtin.include_tasks: fs-mount.yml
+- name: Process encrypted disk pipeline
+  ansible.builtin.include_tasks: disk-pipeline.yml
+  loop: "{{ crypto_disks | default([]) }}"
+  loop_control:
+    loop_var: disk

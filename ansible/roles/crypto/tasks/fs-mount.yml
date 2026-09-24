@@ -5,66 +5,62 @@
     path: "{{ crypto_base_dir }}"
     state: directory
     mode: "0755"
-    owner: olivier
-    group: olivier
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
 
-- name: Ensure Btrfs subvolumes exist
+- name: "Ensure disk base directory exists: {{ disk_base_mount }}"
+  become: true
+  ansible.builtin.file:
+    path: "{{ disk_base_mount }}"
+    state: directory
+    mode: "0755"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+
+- name: "Ensure Btrfs subvolumes exist: {{ disk_name }}"
   become: true
   community.general.btrfs_subvolume:
     name: "{{ item.name }}"
-    filesystem_label: "{{ luks_name }}"
+    filesystem_label: "{{ disk_name }}"
     automount: true
     state: present
-  loop: "{{ btrfs_subvolumes }}"
+  loop: "{{ disk_subvolumes }}"
 
-- name: Ensure subvolume mount directories exist
+- name: "Ensure subvolume mount directories exist: {{ disk_name }}"
   become: true
   ansible.builtin.file:
-    path: "{{ item.mount_point }}"
+    path: "{{ item.mount_point | default(disk_base_mount + '/' + item.name) }}"
     state: directory
     mode: "{{ item.mode | default('0755') }}"
-    owner: "{{ item.owner | default('olivier') }}"
-    group: "{{ item.group | default('olivier') }}"
-  loop: "{{ btrfs_subvolumes }}"
+    owner: "{{ item.owner | default(ansible_user) }}"
+    group: "{{ item.group | default(ansible_user) }}"
+  loop: "{{ disk_subvolumes }}"
 
-- name: Mount Btrfs subvolumes in fstab
+- name: "Mount Btrfs subvolumes in fstab: {{ disk_name }}"
   become: true
   ansible.posix.mount:
-    path: "{{ item.mount_point }}"
-    src: "/dev/mapper/{{ luks_name }}"
+    path: "{{ item.mount_point | default(disk_base_mount + '/' + item.name) }}"
+    src: "LABEL={{ disk_name }}"
     fstype: btrfs
     opts: "{{ item.opts | default(btrfs_default_mount_options + ',subvol=' + item.name) }}"
     boot: false
     state: mounted
-  loop: "{{ btrfs_subvolumes }}"
+  loop: "{{ disk_subvolumes }}"
 
-- name: Ensure subvolume permissions after mounting
+- name: "Ensure subvolume permissions after mounting: {{ disk_name }}"
   become: true
   ansible.builtin.file:
-    path: "{{ item.mount_point }}"
+    path: "{{ item.mount_point | default(disk_base_mount + '/' + item.name) }}"
     state: directory
     mode: "{{ item.mode | default('0755') }}"
-    owner: "{{ item.owner | default('olivier') }}"
-    group: "{{ item.group | default('olivier') }}"
-  loop: "{{ btrfs_subvolumes }}"
+    owner: "{{ item.owner | default(ansible_user) }}"
+    group: "{{ item.group | default(ansible_user) }}"
+  loop: "{{ disk_subvolumes }}"
 
-- name: Remove legacy fake fstab file if present
+- name: "Configure monthly Btrfs scrub cron job: {{ disk_name }}"
   become: true
-  ansible.builtin.file:
-    path: "{{ crypto_base_dir }}/.fakefstab"
-    state: absent
-
-- name: Copy snapshot script
-  when: ansible_distribution in ['Debian', 'Ubuntu']
-  ansible.builtin.copy:
-    src: "snapshot.sh"
-    dest: "{{ crypto_base_dir }}/snapshot.sh"
-    mode: "0755"
-
-- name: Install snapshot script in crontab
   ansible.builtin.cron:
-    name: "snapshot data"
-    user: "olivier"
-    hour: "5"
-    minute: "0"
-    job: "{{ crypto_base_dir }}/snapshot.sh"
+    name: "btrfs scrub {{ disk_name }}"
+    user: "root"
+    special_time: "monthly"
+    job: "/usr/bin/btrfs scrub start -B {{ disk_subvolumes[0].mount_point | default(disk_base_mount + '/' + disk_subvolumes[0].name) }} >/dev/null 2>&1"

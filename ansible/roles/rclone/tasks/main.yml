@@ -12,8 +12,8 @@
     path: "{{ crypto_base_dir }}/{{ item }}"
     state: directory
     mode: "0755"
-    owner: olivier
-    group: olivier
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
   loop:
     - bin
     - logs
@@ -28,7 +28,7 @@
 - name: Install rclone script in crontab
   ansible.builtin.cron:
     name: "rclone {{ item.provider }} {{ item.bucket }}"
-    user: "olivier"
+    user: "{{ ansible_user }}"
     hour: "{{ item.hour | default(4 + ((idx * 15) // 60)) | string }}"
     minute: "{{ item.minute | default((idx * 15) % 60) | string }}"
     job: "{{ crypto_base_dir }}/bin/rclone.sh {{ item.provider }} {{ item.bucket }}"

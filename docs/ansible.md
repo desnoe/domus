@@ -10,33 +10,35 @@ The infrastructure runs on Debian hosts (`lab` and `live` environments). For hos
 
 ```mermaid
 flowchart TD
-    Disk["Physical Block Device (e.g. /dev/sda, /dev/sdb)"] -->|LUKS AES-256 (luks_pass)| LUKS["Decrypted Mapper (/dev/mapper/crypt_sda)"]
-    LUKS -->|Btrfs Filesystem (compress=zstd:3,noatime)| RootBtrfs["Btrfs Root"]
-    RootBtrfs --> SubvolSync["Subvolume: sync (Mounted at ~/crypto/sync)"]
-    RootBtrfs --> SubvolSnap["Subvolume: snapshots (Mounted at ~/crypto/snapshots)"]
+    Disk0["Physical Disk 0 (/dev/disk/by-id/...)"] -->|LUKS AES-256| LUKS0["Decrypted Mapper (/dev/mapper/data-0)"]
+    Disk1["Physical Disk 1 (/dev/disk/by-id/...)"] -->|LUKS AES-256| LUKS1["Decrypted Mapper (/dev/mapper/data-1)"]
+    LUKS0 -->|Btrfs RAID1 Pool (LABEL=data)| RootBtrfs["Btrfs Root (Mounted at ~/crypto/data)"]
+    LUKS1 -->|Btrfs RAID1 Pool (LABEL=data)| RootBtrfs
+    RootBtrfs --> SubvolSync["Subvolume: sync (Mounted at ~/crypto/data/sync)"]
+    RootBtrfs --> SubvolSnap["Subvolume: snapshots (Mounted at ~/crypto/data/snapshots)"]
     Cloud["Cloud Storage (OneDrive, S3)"] -->|Staggered Rclone Cron (04:00, 04:15, ...)| SubvolSync
-    SubvolSync -->|Daily Snapshot Cron (05:00, 7-daily + 4-weekly retention)| SubvolSnap
+    SubvolSync -->|Daily Snapshot Cron (05:00, 30-daily + 52-weekly retention)| SubvolSnap
 ```
 
 ### Technical Rationale & Storage Layers
 
-1. **Physical Block Device vs. Decrypted Device Mapper**:
-   - The raw physical device (e.g., `/dev/sda` or `/dev/sdb`) holds the LUKS on-disk header (keyslots and metadata) followed by encrypted ciphertext.
-   - Opening the container (`cryptsetup open`) creates a decrypted virtual block device mapped at `/dev/mapper/<luks_name>`.
-   - The Btrfs filesystem is formatted directly on `/dev/mapper/<luks_name>`. Formatting the raw drive (`/dev/sda`) would immediately overwrite the LUKS header and destroy encryption metadata.
+1. **Multi-Device LUKS Layer (`/dev/mapper/<name>-<idx>`)**:
+   - Each physical device declared in `devices` is encrypted individually as an independent LUKS container using AES-256 (`luks_pass`).
+   - Decrypted virtual block devices are mapped as `/dev/mapper/<name>-0`, `/dev/mapper/<name>-1`, etc.
+   - Each member device maintains its own isolated LUKS header backup in `/var/backups/luks/luks-header-<name>-<idx>.img`.
 
-2. **LVM2 Deprecation & Direct Btrfs**:
-   - The previous storage stack placed an LVM2 layer (`PV -> VG -> LV`) between LUKS and the filesystem.
-   - Modern Btrfs renders LVM2 redundant: Btrfs subvolumes act as independent POSIX namespaces that dynamically share the underlying pool without fixed partition boundaries or manual volume resizing.
-   - Eliminating LVM2 simplifies disaster recovery, reduces kernel mapping layers, and removes state synchronization issues between LVM and device-mapper.
+2. **Native Btrfs RAID1 Mirroring**:
+   - For multi-device pools (`devices | length > 1`), Btrfs is formatted directly across all decrypted member devices with `-d raid1 -m raid1 -L <name>`.
+   - Btrfs native RAID1 provides two copies of all data and metadata across distinct devices, offering self-healing checksum repair during read operations and monthly scrubs without requiring mdadm or hardware RAID.
+   - For single-device pools (`devices | length == 1`), standard Btrfs profile is created.
 
-3. **Filesystem Labeling & Subvolume Idempotency**:
-   - Btrfs filesystems are initialized with a label matching the mapper device name (`-L {{ luks_name }}`).
-   - Ansible's `community.general.btrfs_subvolume` module references the filesystem via `filesystem_label: "{{ luks_name }}"`, avoiding device-mapper path resolution quirks where `/dev/mapper/<name>` resolves to `/dev/dm-X`.
-
-4. **Mount Options & Boot Safety (`/etc/fstab`)**:
-   - Subvolumes are mounted at `{{ crypto_base_dir }}/<subvol>` using options `noauto,nofail,compress=zstd:3,noatime,subvol=<subvol>`.
-   - `noauto,nofail`: Ensures the host boots reliably without hanging or dropping into emergency maintenance mode before the encrypted LUKS container is unlocked.
+3. **Label-Based Mounting & Dynamic Discovery (`/etc/fstab`)**:
+   - Btrfs pools are initialized with filesystem label `-L {{ disk_name }}`.
+   - `btrfs device scan` registers all opened member mappers with the kernel.
+   - Subvolumes are mounted in `/etc/fstab` using `src: "LABEL={{ disk_name }}"` (e.g. `LABEL=data`), guaranteeing clean pool assembly regardless of device enumeration order.
+   - Subvolumes are nested within the volume directory at `{{ crypto_base_dir }}/<disk_name>/<subvol>` (e.g. `{{ crypto_base_dir }}/data/sync`, `{{ crypto_base_dir }}/data/snapshots`) with options `noauto,nofail,compress=zstd:3,noatime,user_subvol_rm_allowed,subvol=<subvol>`.
+   - `noauto,nofail`: Ensures the host boots reliably without emergency shell drops before encrypted LUKS containers are unlocked.
+   - `user_subvol_rm_allowed`: Enables snapshot rotation by `ansible_user` without root elevation.
    - `compress=zstd:3`: Transparent filesystem-level compression reducing flash wear and disk space usage.
    - `noatime`: Eliminates metadata write overhead on read operations.
 
@@ -65,14 +67,38 @@ Understanding where variables are defined is essential for maintaining and provi
 
 ### 1. Global Variables (`ansible/envs/<env>/group_vars/all/main.yml`)
 Defines shared settings across all hosts:
-- `crypto_base_dir`: Base destination path for decrypted mounts (default: `/home/olivier/crypto`).
-- `ansible_python_interpreter`: Path to target python interpreter (`/usr/bin/python3`).
-- `disable_cloud_init_warnings`: Suppress cloud-init warnings if applicable.
+- `ansible_user`: Remote SSH and primary system username (e.g. `olivier`).
+- `crypto_base_dir`: Base destination path for decrypted mounts (default: `"/home/{{ ansible_user }}/crypto"`).
+
+> [!NOTE]
+> Python interpreter discovery is centralized in `ansible.cfg` via `interpreter_python = auto_silent`, automatically detecting `/usr/bin/python3` across target Debian systems.
 
 ### 2. Host Public Variables (`ansible/envs/<env>/host_vars/<hostname>/main.yml`)
 Configures hardware layout and backup targets:
-- `luks_dev`: Target block device to encrypt (e.g. `/dev/sda` on live, `/dev/sdb` on lab).
-- `luks_name`: Device mapper target name (e.g. `crypt_sda`, `crypt_sdb`).
+- `crypto_disks`: Declarative list of encrypted storage pools to manage (supports 0, 1, or multiple volumes). Each volume can contain 1 or N underlying physical disks (`devices: [...]`). When multiple devices are declared, Btrfs automatically formats native RAID1 (`-d raid1 -m raid1`). If `subvolumes` is omitted, it defaults to `btrfs_default_subvolumes` (`sync` and `snapshots`), nested under `{{ crypto_base_dir }}/<name>/`:
+  ```yaml
+  crypto_disks:
+    - name: data       # Semantic volume name (label: data, mappers: /dev/mapper/data-0, data-1...)
+      devices:
+        - /dev/disk/by-id/ata-debian-1_SSD_...
+        # - /dev/disk/by-id/ata-debian-2_SSD_... (Optional: add 2nd disk for Btrfs RAID1)
+      # Optional: custom subvolumes (defaults to sync & snapshots under crypto_base_dir/data)
+      # subvolumes:
+      #   - name: sync
+      #   - name: snapshots
+  ```
+- `snapshot_jobs`: Declarative list of Btrfs snapshot jobs scheduled via crontab:
+  ```yaml
+  snapshot_jobs:
+    - name: data
+      source: "{{ crypto_base_dir }}/data/sync"
+      destination: "{{ crypto_base_dir }}/data/snapshots"
+      # optional retention & schedule:
+      # keep_daily: 30
+      # keep_weekly: 52
+      # hour: "5"
+      # minute: "0"
+  ```
 - `rclone_jobs`: List of cloud remotes and buckets to sync via rclone:
   ```yaml
   rclone_jobs:
@@ -88,7 +114,7 @@ Configures hardware layout and backup targets:
 
 Each host's `vault.yml` defines:
 - **`luks_pass`**: The disk encryption passphrase used by `cryptsetup` to format or open the LUKS container.
-- **`user_password`**: The `sha512crypt` password hash for user `olivier`. This variable is consumed by `ansible/roles/sudo/tasks/main.yml` when creating or updating the user account.
+- **`user_password`**: The `sha512crypt` password hash for the primary user (`ansible_user`). This variable is consumed by `ansible/roles/sudo/tasks/main.yml` when creating or updating the user account.
 
 #### Managing Vault Files:
 A template is maintained in [`ansible/vault.yml.example`](../ansible/vault.yml.example).
@@ -115,7 +141,7 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 ### 1. `ansible/bootstrap.yml`
 - **Purpose**: Initial bootstrap on a clean, minimal Debian install where only `root` exists.
 - **Roles executed**: `apt`, `sudo`, `sshd`.
-- **Action**: Installs essential packages (`sudo`), creates user `olivier` with sudo rights via `/etc/sudoers.d/99-ansible-wheel` and password `user_password`, provisions authorized SSH keys, and hardens SSH daemon.
+- **Action**: Installs essential packages (`sudo`), creates user `{{ ansible_user }}` with sudo rights via `/etc/sudoers.d/99-ansible-wheel` and password `user_password`, provisions authorized SSH keys, and hardens SSH daemon.
 - **Usage**:
   ```bash
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/bootstrap.yml -k -K
@@ -148,20 +174,36 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/wipe-and-reencrypt.yml
   ```
 
+### 5. `ansible/status.yml`
+- **Purpose**: Non-destructive, read-only diagnostic playbook reporting LUKS status, header backup presence, Btrfs usage and allocation, snapshot counts, recent rclone logs, and disk SMART health.
+- **Roles executed**: None (runs diagnostic commands directly against `hosts: crypto`).
+- **Usage**:
+  ```bash
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml
+  ```
+
+---
+
+## 🚑 Disaster Recovery & Emergency Operations
+
+For manual recovery instructions without Ansible, snapshot restoration, or LUKS header restoration from `/var/backups/luks/`, see the dedicated guide:
+👉 **[Disaster Recovery & Storage Operations Guide](disaster-recovery.md)**
+
 ---
 
 ## 🧩 Roles Breakdown
 
 | Role | Description | Key Managed Files / Services |
 | :--- | :--- | :--- |
-| **`apt`** | Ensures `sudo` and package tools are installed; upgrades system package cache. | `apt` cache, system packages |
+| **`apt`** | Ensures `sudo` and package tools are installed; upgrades system package cache; configures automatic security updates (`unattended-upgrades`). | `apt` cache, `/etc/apt/apt.conf.d/20auto-upgrades` |
 | **`base`** | Installs common utilities (`curl`, `rsync`, `tree`, `wget`, etc.), sets `/etc/hostname`, and installs customized `.bashrc`. | `/etc/hostname`, `~/.bashrc`, `/root/.bashrc` |
-| **`crypto`** | Manages the full encrypted storage stack: LUKS format/open via memory/stdin, direct Btrfs formatting on `/dev/mapper/<luks_name>`, declarative subvolumes (`sync`, `snapshots`) with zstd compression and fstab integration, and daily snapshot cron job with automated retention (7 daily + 4 weekly). | `/dev/mapper/<luks_name>`, `/etc/fstab`, `snapshot.sh` |
+| **`crypto`** | Manages the full encrypted storage stack across 0, 1, or N volumes (`crypto_disks`) with single or multi-device Btrfs native RAID1: per-device LUKS format/open via memory/stdin, automated LUKS header backups (`/var/backups/luks/`), kernel device scanning (`btrfs device scan`), direct Btrfs formatting with semantic labels and automatic RAID1 mirroring, declarative subvolumes (`sync`, `snapshots`) with zstd compression and label-based fstab integration (`LABEL=<name>`), and monthly Btrfs scrub cron. | `/dev/mapper/<name>-<idx>`, `/var/backups/luks/`, `/etc/fstab` |
 | **`htop`** | Installs `htop` and user configuration. | `~/.config/htop/htoprc` |
 | **`iptables`** | Sets up packet filtering firewall rules and restore handler. | `/etc/network/iptables.up.rules` |
 | **`locales`** | Configures system locales (`en_US.UTF-8`, `fr_FR.UTF-8`). | `/etc/default/locale`, `/etc/locale.gen` |
 | **`ntp`** | Sets timezone (`Europe/Paris`) and configures time synchronization (`chrony` on Debian 12+, `ntp` on Debian <= 11). | `tzdata`, `chrony`/`ntp` service |
 | **`rclone`** | Installs `rclone`, sets up sync wrapper script (`rclone.sh` with 30-day log rotation), and configures staggered cron jobs for scheduled cloud backups. | `rclone.sh`, user crontab |
+| **`snapshot`** | Manages Btrfs snapshot automation: installs reusable CLI script (`{{ crypto_base_dir }}/bin/snapshot.sh`), and configures declarative crontabs (`snapshot_jobs`) with parallel execution safety (per-destination lockfiles) and configurable retention (30 daily + 52 weekly). | `{{ crypto_base_dir }}/bin/snapshot.sh`, user crontab |
 | **`sshd`** | Hardens SSH configuration (disables root login, disables password authentication) and manages `authorized_keys`. | `/etc/ssh/sshd_config`, `~/.ssh/authorized_keys` |
-| **`sudo`** | Creates `wheel` group, configures `/etc/sudoers.d/99-ansible-wheel` (validated via `visudo`), and creates user `olivier` with `user_password`. | `/etc/sudoers.d/99-ansible-wheel`, `/etc/passwd` |
+| **`sudo`** | Creates `wheel` group, configures `/etc/sudoers.d/99-ansible-wheel` (validated via `visudo`), and creates user `{{ ansible_user }}` with `user_password`. | `/etc/sudoers.d/99-ansible-wheel`, `/etc/passwd` |
 | **`vim`** | Installs `vim` and provisions `.vimrc` for regular user and root. | `~/.vimrc`, `/root/.vimrc` |

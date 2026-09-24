@@ -1,0 +1,3 @@
+---
+crypto_base_dir: "/home/{{ ansible_user }}/crypto"
+rclone_jobs: []

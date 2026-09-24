@@ -1,5 +1,3 @@
 ansible_user: olivier
-disable_cloud_init_warnings: false
-ansible_python_interpreter: /usr/bin/python3
 
-crypto_base_dir: /home/olivier/crypto
+crypto_base_dir: "/home/{{ ansible_user }}/crypto"

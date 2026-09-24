@@ -15,21 +15,12 @@
     mode: "0440"
     validate: "/usr/sbin/visudo -cf %s"
 
-- name: Clean up legacy wheel configuration from /etc/sudoers
-  become: true
-  ansible.builtin.lineinfile:
-    dest: /etc/sudoers
-    regexp: '^%wheel'
-    state: absent
-    validate: "/usr/sbin/visudo -cf %s"
-
-- name: Configure user olivier with wheel group membership
+- name: "Configure user {{ ansible_user }} with wheel group membership"
   become: true
   no_log: true
   ansible.builtin.user:
-    name: olivier
+    name: "{{ ansible_user }}"
     password: "{{ user_password }}"
-    comment: "Olivier Desnoe"
     groups:
       - wheel
     append: true

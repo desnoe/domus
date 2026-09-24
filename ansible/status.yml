@@ -1,0 +1,54 @@
+---
+- name: Report storage and system status
+  hosts: crypto
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Report status when no encrypted storage is configured
+      when: (crypto_disks | default([])) | length == 0
+      ansible.builtin.debug:
+        msg: |
+          =======================================================
+          STORAGE HEALTH & STATUS REPORT: {{ inventory_hostname }}
+          Date: {{ ansible_date_time.iso8601 }}
+          =======================================================
+          Notice: No encrypted disks configured on this host (crypto_disks is empty).
+          =======================================================
+
+    - name: Query status for each configured disk
+      ansible.builtin.include_tasks: status-disk.yml
+      loop: "{{ crypto_disks | default([]) }}"
+      loop_control:
+        loop_var: current_disk
+
+    - name: Query recent Btrfs snapshots
+      when: (snapshot_jobs | default([])) | length > 0
+      ansible.builtin.shell:
+        cmd: "ls -td {% for job in snapshot_jobs %}{{ job.destination }}/* {% endfor %}2>/dev/null | head -n 5"
+      register: recent_snapshots_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Query recent rclone backup logs
+      when: (crypto_disks | default([])) | length > 0
+      ansible.builtin.shell:
+        cmd: "ls -t {{ crypto_base_dir }}/logs/*/*/*.log 2>/dev/null | head -n 5"
+      register: recent_logs_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Display Snapshots and Backup Logs Summary
+      when: (crypto_disks | default([])) | length > 0
+      ansible.builtin.debug:
+        msg: |
+          =======================================================
+          SNAPSHOTS & BACKUP LOGS: {{ inventory_hostname }}
+          =======================================================
+
+          --- BTRFS SNAPSHOTS (Recent 5) ---
+          {{ recent_snapshots_cmd.stdout | default('No snapshots found.', true) }}
+
+          --- RECENT RCLONE BACKUP LOGS ---
+          {{ recent_logs_cmd.stdout | default('No rclone logs found.', true) }}
+          =======================================================

@@ -1,0 +1,29 @@
+---
+- name: Ensure secure LUKS backup directory exists
+  become: true
+  ansible.builtin.file:
+    path: "/var/backups/luks"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: "Check if LUKS header backup exists: {{ disk_name }}-{{ dev_idx }}"
+  become: true
+  ansible.builtin.stat:
+    path: "/var/backups/luks/luks-header-{{ disk_name }}-{{ dev_idx }}.img"
+  register: luks_header_backup
+
+- name: "Backup LUKS header: {{ disk_name }}-{{ dev_idx }}"
+  become: true
+  ansible.builtin.command:
+    cmd: "cryptsetup luksHeaderBackup {{ dev_item }} --header-backup-file /var/backups/luks/luks-header-{{ disk_name }}-{{ dev_idx }}.img"
+  when: not luks_header_backup.stat.exists
+
+- name: "Ensure strict permissions on LUKS header backup file: {{ disk_name }}-{{ dev_idx }}"
+  become: true
+  ansible.builtin.file:
+    path: "/var/backups/luks/luks-header-{{ disk_name }}-{{ dev_idx }}.img"
+    owner: root
+    group: root
+    mode: "0400"

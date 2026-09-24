@@ -1,8 +1,8 @@
 ---
-- name: Format Btrfs filesystem on decrypted LUKS device
+- name: "Format Btrfs filesystem on decrypted LUKS devices: {{ disk_name }}"
   become: true
-  community.general.filesystem:
-    fstype: btrfs
-    dev: "/dev/mapper/{{ luks_name }}"
-    opts: "-L {{ luks_name }}"
-    force: true
+  ansible.builtin.command: >-
+    mkfs.btrfs -f -L {{ disk_name }}
+    {% if disk_devices | length > 1 %}-d raid1 -m raid1 {% endif %}
+    {% for idx in range(disk_devices | length) %}/dev/mapper/{{ disk_name }}-{{ idx }} {% endfor %}
+  changed_when: true
