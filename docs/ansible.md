@@ -18,6 +18,28 @@ flowchart TD
     SubvolSync -->|Daily Snapshot Cron (05:00, 7-daily + 4-weekly retention)| SubvolSnap
 ```
 
+### Technical Rationale & Storage Layers
+
+1. **Physical Block Device vs. Decrypted Device Mapper**:
+   - The raw physical device (e.g., `/dev/sda` or `/dev/sdb`) holds the LUKS on-disk header (keyslots and metadata) followed by encrypted ciphertext.
+   - Opening the container (`cryptsetup open`) creates a decrypted virtual block device mapped at `/dev/mapper/<luks_name>`.
+   - The Btrfs filesystem is formatted directly on `/dev/mapper/<luks_name>`. Formatting the raw drive (`/dev/sda`) would immediately overwrite the LUKS header and destroy encryption metadata.
+
+2. **LVM2 Deprecation & Direct Btrfs**:
+   - The previous storage stack placed an LVM2 layer (`PV -> VG -> LV`) between LUKS and the filesystem.
+   - Modern Btrfs renders LVM2 redundant: Btrfs subvolumes act as independent POSIX namespaces that dynamically share the underlying pool without fixed partition boundaries or manual volume resizing.
+   - Eliminating LVM2 simplifies disaster recovery, reduces kernel mapping layers, and removes state synchronization issues between LVM and device-mapper.
+
+3. **Filesystem Labeling & Subvolume Idempotency**:
+   - Btrfs filesystems are initialized with a label matching the mapper device name (`-L {{ luks_name }}`).
+   - Ansible's `community.general.btrfs_subvolume` module references the filesystem via `filesystem_label: "{{ luks_name }}"`, avoiding device-mapper path resolution quirks where `/dev/mapper/<name>` resolves to `/dev/dm-X`.
+
+4. **Mount Options & Boot Safety (`/etc/fstab`)**:
+   - Subvolumes are mounted at `{{ crypto_base_dir }}/<subvol>` using options `noauto,nofail,compress=zstd:3,noatime,subvol=<subvol>`.
+   - `noauto,nofail`: Ensures the host boots reliably without hanging or dropping into emergency maintenance mode before the encrypted LUKS container is unlocked.
+   - `compress=zstd:3`: Transparent filesystem-level compression reducing flash wear and disk space usage.
+   - `noatime`: Eliminates metadata write overhead on read operations.
+
 ---
 
 ## 📁 Environments & Inventory Structure
@@ -27,7 +49,7 @@ Ansible configurations are partitioned under `ansible/envs/`:
 - **`ansible/envs/lab/`**: Testing and development environment.
   - Hosts: `debian.delarche.fr`
 - **`ansible/envs/live/`**: Production home infrastructure.
-  - Hosts: `kodlin1.delarche.fr`, `zotac.delarche.fr`
+  - Hosts: `kodlix.delarche.fr`, `zotac.delarche.fr`
 
 Each environment contains:
 - `inventory.ini`: Host declarations and group assignments (`crypto`).

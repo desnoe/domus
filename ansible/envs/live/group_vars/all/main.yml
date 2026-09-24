@@ -1,3 +1,4 @@
+ansible_user: olivier
 disable_cloud_init_warnings: false
 ansible_python_interpreter: /usr/bin/python3
 

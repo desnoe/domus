@@ -4,4 +4,5 @@
   community.general.filesystem:
     fstype: btrfs
     dev: "/dev/mapper/{{ luks_name }}"
+    opts: "-L {{ luks_name }}"
     force: true

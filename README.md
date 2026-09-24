@@ -105,7 +105,6 @@ uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/wipe-and-reenc
 ## 📚 Documentation & Guidelines
 
 - **[Detailed Ansible Architecture & Roles Guide](docs/ansible.md)**: Deep dive into all playbooks, roles, and storage layout.
-- **[Project Roadmap](ROADMAP.md)**: Four-phase roadmap tracking modernization and security hardening.
 - **[AI Agent & Contributor Guidelines](AGENTS.md)**: Language policy (mandatory English), coding standards, and pre-commit rules.
 
 ---

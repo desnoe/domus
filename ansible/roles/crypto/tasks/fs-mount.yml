@@ -12,7 +12,7 @@
   become: true
   community.general.btrfs_subvolume:
     name: "{{ item.name }}"
-    filesystem_device: "/dev/mapper/{{ luks_name }}"
+    filesystem_label: "{{ luks_name }}"
     automount: true
     state: present
   loop: "{{ btrfs_subvolumes }}"
@@ -34,6 +34,7 @@
     src: "/dev/mapper/{{ luks_name }}"
     fstype: btrfs
     opts: "{{ item.opts | default(btrfs_default_mount_options + ',subvol=' + item.name) }}"
+    boot: false
     state: mounted
   loop: "{{ btrfs_subvolumes }}"
 

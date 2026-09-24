@@ -1,7 +1,7 @@
 ---
 wipe: false
 
-btrfs_default_mount_options: "noauto,nofail,compress=zstd:3,noatime"
+btrfs_default_mount_options: "nofail,compress=zstd:3,noatime"
 
 btrfs_subvolumes:
   - name: sync

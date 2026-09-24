@@ -13,7 +13,7 @@
     owner: root
     group: root
     mode: "0440"
-    validate: "visudo -cf %s"
+    validate: "/usr/sbin/visudo -cf %s"
 
 - name: Clean up legacy wheel configuration from /etc/sudoers
   become: true
@@ -21,7 +21,7 @@
     dest: /etc/sudoers
     regexp: '^%wheel'
     state: absent
-    validate: "visudo -cf %s"
+    validate: "/usr/sbin/visudo -cf %s"
 
 - name: Configure user olivier with wheel group membership
   become: true
