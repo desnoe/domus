@@ -12,12 +12,12 @@ The infrastructure runs on Debian hosts (`lab` and `live` environments). For hos
 flowchart TD
     Disk0["Physical Disk 0 (/dev/disk/by-id/...)"] -->|LUKS AES-256| LUKS0["Decrypted Mapper (/dev/mapper/data-0)"]
     Disk1["Physical Disk 1 (/dev/disk/by-id/...)"] -->|LUKS AES-256| LUKS1["Decrypted Mapper (/dev/mapper/data-1)"]
-    LUKS0 -->|Btrfs RAID1 Pool (LABEL=data)| RootBtrfs["Btrfs Root (Mounted at ~/crypto/data)"]
-    LUKS1 -->|Btrfs RAID1 Pool (LABEL=data)| RootBtrfs
-    RootBtrfs --> SubvolSync["Subvolume: sync (Mounted at ~/crypto/data/sync)"]
-    RootBtrfs --> SubvolSnap["Subvolume: snapshots (Mounted at ~/crypto/data/snapshots)"]
-    Cloud["Cloud Storage (OneDrive, S3)"] -->|Staggered Rclone Cron (04:00, 04:15, ...)| SubvolSync
-    SubvolSync -->|Daily Snapshot Cron (05:00, 30-daily + 52-weekly retention)| SubvolSnap
+    LUKS0 -->|"Btrfs RAID1 Pool (LABEL=data)"| RootBtrfs["Btrfs Root (Mounted at ~/data)"]
+    LUKS1 -->|"Btrfs RAID1 Pool (LABEL=data)"| RootBtrfs
+    RootBtrfs --> SubvolSync["Subvolume: sync (Mounted at ~/data/sync)"]
+    RootBtrfs --> SubvolSnap["Subvolume: snapshots (Mounted at ~/data/snapshots)"]
+    Cloud["Cloud Storage (OneDrive, S3)"] -->|"Staggered Rclone Cron (04:00, 04:15, ...)"| SubvolSync
+    SubvolSync -->|"Daily Snapshot Cron (05:00, 30-daily + 52-weekly retention)"| SubvolSnap
 ```
 
 ### Technical Rationale & Storage Layers
@@ -68,7 +68,7 @@ Understanding where variables are defined is essential for maintaining and provi
 ### 1. Global Variables (`ansible/envs/<env>/group_vars/all/main.yml`)
 Defines shared settings across all hosts:
 - `ansible_user`: Remote SSH and primary system username (e.g. `olivier`).
-- `crypto_base_dir`: Base destination path for decrypted mounts (default: `"/home/{{ ansible_user }}/crypto"`).
+- `crypto_base_dir`: Base destination path for decrypted mounts (default: `"/home/{{ ansible_user }}"`).
 
 > [!NOTE]
 > Python interpreter discovery is centralized in `ansible.cfg` via `interpreter_python = auto_silent`, automatically detecting `/usr/bin/python3` across target Debian systems.
@@ -113,8 +113,7 @@ Configures hardware layout and backup targets:
 > All sensitive credentials and secrets are encrypted with `ansible-vault` (AES-256) using password file `~/.ansible_vault_pass`.
 
 Each host's `vault.yml` defines:
-- **`luks_pass`**: The disk encryption passphrase used by `cryptsetup` to format or open the LUKS container.
-- **`user_password`**: The `sha512crypt` password hash for the primary user (`ansible_user`). This variable is consumed by `ansible/roles/sudo/tasks/main.yml` when creating or updating the user account.
+- **`luks_pass`**: The disk encryption passphrase used by `cryptsetup` to format or open the LUKS containers.
 
 #### Managing Vault Files:
 A template is maintained in [`ansible/vault.yml.example`](../ansible/vault.yml.example).
@@ -139,47 +138,74 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 ## 📜 Playbooks Description & Workflows
 
 ### 1. `ansible/bootstrap.yml`
-- **Purpose**: Initial bootstrap on a clean, minimal Debian install where only `root` exists.
-- **Roles executed**: `apt`, `sudo`, `sshd`.
-- **Action**: Installs essential packages (`sudo`), creates user `{{ ansible_user }}` with sudo rights via `/etc/sudoers.d/99-ansible-wheel` and password `user_password`, provisions authorized SSH keys, and hardens SSH daemon.
+- **Purpose**: Initial bootstrap on a clean, minimal Debian install.
+- **Prerequisite**: Deploy authorized SSH key beforehand via `ssh-copy-id {{ ansible_user }}@<host>` (or use `-k` to prompt for SSH password interactively).
+- **Roles executed**: `apt`, `sudo`, `sshd`, and automatically imports `ansible/system.yml`.
+- **Action**: Installs essential packages (`sudo`), configures user `{{ ansible_user }}` with sudo rights via `/etc/sudoers.d/99-ansible-wheel` (without managing or altering local Unix passwords), provisions authorized SSH keys, hardens SSH daemon, and applies complete OS baseline configuration.
 - **Usage**:
   ```bash
-  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/bootstrap.yml -k -K
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/bootstrap.yml -K
+  ```
+  *(The `-K` flag interactively prompts for the `become` password in your terminal; passwords are never saved to disk or git).*
+
+### 2. `ansible/system.yml`
+- **Purpose**: System-wide baseline configuration, package management, security hardening, and service management. Completely decoupled from storage management.
+- **Target hosts**: `hosts: all`
+- **Roles executed**: `apt`, `base`, `htop`, `iptables`, `locales`, `ntp`, `sshd`, `sudo`, `vim`.
+- **Usage**:
+  ```bash
+  uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml
   ```
 
-### 2. `ansible/reconfigure-and-decrypt.yml`
-- **Purpose**: Complete host baseline configuration, unlock encrypted storage, and set up backup cron jobs.
-- **Target groups**:
-  - `hosts: all`: Executes `apt`, `base`, `htop`, `iptables`, `locales`, `ntp`, `sshd`, `sudo`, `vim`.
-  - `hosts: crypto`: Executes `crypto`, `rclone`.
+### 3. `ansible/storage-unlock.yml`
+- **Purpose**: Fast, non-destructive playbook used after server reboot to unlock LUKS containers and mount Btrfs subvolumes.
+- **Target hosts**: `hosts: crypto`
+- **Roles executed**: `crypto` (only decrypts LUKS, scans Btrfs devices, verifies headers, and mounts subvolumes).
 - **Usage**:
   ```bash
-  uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/reconfigure-and-decrypt.yml
+  uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/storage-unlock.yml
   ```
 
-### 3. `ansible/decrypt-only.yml`
-- **Purpose**: Fast playbook used after a server reboot to unlock and mount encrypted storage without re-running the full system configuration roles.
-- **Roles executed**: `crypto` (only decrypts LUKS and mounts Btrfs subvolumes).
+### 4. `ansible/storage-wipe-and-reset.yml`
+- **Purpose**: Destructive playbook used when provisioning new storage or resetting an entire storage pool.
+- **Target hosts**: `hosts: crypto`
+- **Safety**: Includes interactive confirmation prompt (or `-e "confirm_wipe=yes"`).
+- **Action**: Unmounts subvolumes, formats LUKS on member devices, creates multi-device Btrfs RAID1 filesystem, creates subvolumes (`sync`, `snapshots`), and mounts in `/etc/fstab`.
 - **Usage**:
   ```bash
-  uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/decrypt-only.yml
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-wipe-and-reset.yml
   ```
 
-### 4. `ansible/wipe-and-reencrypt.yml`
-- **Purpose**: Destructive playbook used when provisioning a new drive or resetting storage.
-- **Variables**: Sets `wipe: true`.
-- **Action**: Unmounts filesystems, wipes previous LUKS headers, re-encrypts the block device, formats fresh Btrfs filesystem on the decrypted device, creates declarative subvolumes (`sync`, `snapshots`), and mounts them in `/etc/fstab`.
+### 5. `ansible/storage-replace.yml`
+- **Purpose**: Guided workflow to replace a failed member disk in a Btrfs RAID1 pool.
+- **Target hosts**: `hosts: crypto`
+- **Workflow**: Auto-detects the new device from `host_vars`, ensures Btrfs is mounted (degraded if necessary), prompts for confirmation, formats LUKS, opens mapper, runs `btrfs replace start`, and creates a LUKS header backup.
 - **Usage**:
   ```bash
-  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/wipe-and-reencrypt.yml
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-replace.yml
   ```
 
-### 5. `ansible/status.yml`
-- **Purpose**: Non-destructive, read-only diagnostic playbook reporting LUKS status, header backup presence, Btrfs usage and allocation, snapshot counts, recent rclone logs, and disk SMART health.
-- **Roles executed**: None (runs diagnostic commands directly against `hosts: crypto`).
+### 6. `ansible/backup.yml`
+- **Purpose**: Configures automated backup schedules and synchronization jobs.
+- **Target hosts**: `hosts: crypto`
+- **Roles executed**: `snapshot` (installs `snapshot.sh` and crontabs), `rclone` (installs `rclone.sh` and crontabs).
 - **Usage**:
   ```bash
+  uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/backup.yml
+  ```
+
+### 7. `ansible/status.yml`
+- **Purpose**: Non-destructive, read-only diagnostic playbook reporting LUKS container status, header backups, SMART health, Btrfs usage and error stats, recent snapshots, and recent rclone logs.
+- **Roles executed**: Modularly imports status tasks from `crypto`, `snapshot`, and `rclone` roles.
+- **Usage**:
+  ```bash
+  # Full health report
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml
+
+  # Scoped queries using tags
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags crypto
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags snapshot
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags rclone
   ```
 
 ---
@@ -205,5 +231,5 @@ For manual recovery instructions without Ansible, snapshot restoration, or LUKS 
 | **`rclone`** | Installs `rclone`, sets up sync wrapper script (`rclone.sh` with 30-day log rotation), and configures staggered cron jobs for scheduled cloud backups. | `rclone.sh`, user crontab |
 | **`snapshot`** | Manages Btrfs snapshot automation: installs reusable CLI script (`{{ crypto_base_dir }}/bin/snapshot.sh`), and configures declarative crontabs (`snapshot_jobs`) with parallel execution safety (per-destination lockfiles) and configurable retention (30 daily + 52 weekly). | `{{ crypto_base_dir }}/bin/snapshot.sh`, user crontab |
 | **`sshd`** | Hardens SSH configuration (disables root login, disables password authentication) and manages `authorized_keys`. | `/etc/ssh/sshd_config`, `~/.ssh/authorized_keys` |
-| **`sudo`** | Creates `wheel` group, configures `/etc/sudoers.d/99-ansible-wheel` (validated via `visudo`), and creates user `{{ ansible_user }}` with `user_password`. | `/etc/sudoers.d/99-ansible-wheel`, `/etc/passwd` |
+| **`sudo`** | Creates `wheel` group, configures `/etc/sudoers.d/99-ansible-wheel` (validated via `visudo`), and configures user `{{ ansible_user }}` with wheel group membership and bash shell without managing local passwords. | `/etc/sudoers.d/99-ansible-wheel`, `/etc/passwd` |
 | **`vim`** | Installs `vim` and provisions `.vimrc` for regular user and root. | `~/.vimrc`, `/root/.vimrc` |

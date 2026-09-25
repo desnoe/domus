@@ -12,10 +12,10 @@ Each encrypted server (`debian.delarche.fr`, `kodlix.delarche.fr`, `zotac.delarc
 flowchart TD
     Disk0["Physical Device 0 (/dev/disk/by-id/...)"] -->|cryptsetup luksOpen| Mapper0["Mapper Device (/dev/mapper/data-0)"]
     Disk1["Physical Device 1 (/dev/disk/by-id/...)"] -->|cryptsetup luksOpen| Mapper1["Mapper Device (/dev/mapper/data-1)"]
-    Mapper0 -->|Btrfs RAID1 (LABEL=data)| BtrfsRoot["Btrfs Root (~/crypto/data)"]
-    Mapper1 -->|Btrfs RAID1 (LABEL=data)| BtrfsRoot
-    BtrfsRoot --> SubvolSync["Subvolume: sync (~/crypto/data/sync)"]
-    BtrfsRoot --> SubvolSnap["Subvolume: snapshots (~/crypto/data/snapshots)"]
+    Mapper0 -->|"Btrfs RAID1 (LABEL=data)"| BtrfsRoot["Btrfs Root (~/data)"]
+    Mapper1 -->|"Btrfs RAID1 (LABEL=data)"| BtrfsRoot
+    BtrfsRoot --> SubvolSync["Subvolume: sync (~/data/sync)"]
+    BtrfsRoot --> SubvolSnap["Subvolume: snapshots (~/data/snapshots)"]
 ```
 
 - **Passphrase**: Encrypted in Ansible Vault as `luks_pass`.
@@ -70,30 +70,30 @@ sudo cryptsetup luksClose data-1  # If RAID1 pool
 
 ## 🔄 Scenario 2: Restoring Files from Btrfs Snapshots
 
-Snapshots are stored as read-only Btrfs subvolumes under `~/crypto/data/snapshots/` in the format `YYYY-MM-DD--HH-MM-SS`.
+Snapshots are stored as read-only Btrfs subvolumes under `~/data/snapshots/` in the format `YYYY-MM-DD--HH-MM-SS`.
 
 ### 1. List available snapshots
 ```bash
-ls -lt ~/crypto/data/snapshots/
+ls -lt ~/data/snapshots/
 ```
 
 ### 2. Restore an individual file or directory
-Because snapshots are regular read-only directory trees, you can copy or `rsync` files directly back to `~/crypto/data/sync/`:
+Because snapshots are regular read-only directory trees, you can copy or `rsync` files directly back to `~/data/sync/`:
 
 ```bash
 # Example: restoring a deleted directory
-rsync -aHAXv ~/crypto/data/snapshots/2026-09-24--09-06-44/path/to/folder/ ~/crypto/data/sync/path/to/folder/
+rsync -aHAXv ~/data/snapshots/2026-09-24--09-06-44/path/to/folder/ ~/data/sync/path/to/folder/
 ```
 
 ### 3. Trigger a manual snapshot
 You can execute an ad-hoc snapshot at any time using the reusable CLI script:
 
 ```bash
-$HOME/crypto/bin/snapshot.sh $HOME/crypto/data/sync $HOME/crypto/data/snapshots
+$HOME/bin/snapshot.sh $HOME/data/sync $HOME/data/snapshots
 ```
 Custom retention (e.g. 14 daily, 8 weekly) can be passed optionally:
 ```bash
-$HOME/crypto/bin/snapshot.sh $HOME/crypto/data/sync $HOME/crypto/data/snapshots 14 8
+$HOME/bin/snapshot.sh $HOME/data/sync $HOME/data/snapshots 14 8
 ```
 
 ---
@@ -126,39 +126,69 @@ sudo cryptsetup luksOpen /dev/disk/by-id/<disk-id> <name>-<idx>
 
 ## 🖴 Scenario 4: Physical Disk Replacement
 
-When replacing a failed hard drive or SSD with a new drive:
+When replacing a failed hard drive or SSD:
 
-### 1. Install the new physical disk and retrieve its persistent ID
-```bash
-ls -l /dev/disk/by-id/
-```
+### Case A: Replacing a member disk in a Btrfs RAID1 Pool (Online, Zero Data Loss)
 
-### 2. Update host variables
-Edit `ansible/envs/<env>/host_vars/<hostname>/main.yml` with the new disk ID:
-```yaml
-crypto_disks:
-  - name: data
-    devices:
-      - /dev/disk/by-id/ata-Samsung_SSD_870_EVO_<serial_1>
-      # - /dev/disk/by-id/ata-Samsung_SSD_870_EVO_<serial_2>  # If RAID1 pool
-```
+If the storage pool uses Btrfs RAID1 mirroring across multiple disks, data is safely mirrored on the surviving members:
 
-### 3. Run the destructive provisioning playbook
-```bash
-uv run ansible-playbook -i ansible/envs/<env>/inventory.ini ansible/wipe-and-reencrypt.yml
-```
-This will:
-- Partition and encrypt the new drive with LUKS.
-- Format direct Btrfs with compression.
-- Create declarative subvolumes (`sync`, `snapshots`) nested under `~/crypto/data/`.
-- Configure `/etc/fstab` and backup cron jobs.
-- Generate a new LUKS header backup in `/var/backups/luks/`.
+1. **Install the new physical disk and retrieve its persistent ID**:
+   ```bash
+   ls -l /dev/disk/by-id/
+   ```
 
-### 4. Trigger initial cloud resync
-```bash
-$HOME/crypto/bin/rclone.sh onedrive
-$HOME/crypto/bin/rclone.sh S3 delarche-images
-```
+2. **Update host variables**:
+   Edit `ansible/envs/<env>/host_vars/<hostname>/main.yml` and replace the failed disk ID with the new disk ID under `crypto_disks`:
+   ```yaml
+   crypto_disks:
+     - name: data
+       devices:
+         - /dev/disk/by-id/ata-Samsung_SSD_870_EVO_<surviving_disk>
+         - /dev/disk/by-id/ata-Samsung_SSD_870_EVO_<new_replacement_disk>
+   ```
+
+3. **Run the guided replacement playbook**:
+   ```bash
+   uv run ansible-playbook -i ansible/envs/<env>/inventory.ini ansible/storage-replace.yml
+   ```
+   This automated workflow:
+   - Detects the unformatted replacement disk in `crypto_disks`.
+   - Prompts for explicit confirmation before proceeding.
+   - Formats LUKS on the new disk with `luks_pass` and opens `/dev/mapper/<pool>-<idx>`.
+   - Mounts the filesystem degraded if a missing drive prevented standard mounting.
+   - Triggers `btrfs replace start` to stream mirrored data from surviving disks into the new disk.
+   - Saves a new LUKS header backup to `/var/backups/luks/`.
+
+4. **Verify replacement status**:
+   ```bash
+   sudo btrfs replace status /home/olivier/data/sync
+   uv run ansible-playbook -i ansible/envs/<env>/inventory.ini ansible/status.yml --tags crypto
+   ```
+
+---
+
+### Case B: Complete Storage Reset or Single-Disk Replacement (Destructive)
+
+When replacing all disks simultaneously or resetting an entire pool from scratch:
+
+1. **Update host variables** with all new device IDs in `ansible/envs/<env>/host_vars/<hostname>/main.yml`.
+
+2. **Run the reset playbook**:
+   ```bash
+   uv run ansible-playbook -i ansible/envs/<env>/inventory.ini ansible/storage-wipe-and-reset.yml
+   ```
+   *(Prompts for explicit `WIPE` confirmation).*
+
+3. **Deploy backup jobs**:
+   ```bash
+   uv run ansible-playbook -i ansible/envs/<env>/inventory.ini ansible/backup.yml
+   ```
+
+4. **Trigger initial cloud restore**:
+   ```bash
+   $HOME/bin/rclone.sh onedrive
+   $HOME/bin/rclone.sh S3 delarche-images
+   ```
 
 ---
 
@@ -168,9 +198,9 @@ A monthly scrub cron job is automatically configured. To manually run and check 
 
 ```bash
 # Start scrub in foreground with progress
-sudo btrfs scrub start -B ~/crypto/data
+sudo btrfs scrub start -B ~/data
 
 # Check last scrub status and error counters
-sudo btrfs scrub status ~/crypto/data
+sudo btrfs scrub status ~/data
 ```
 Verify that `csum_errors`, `verify_errors`, and `uncorrectable_errors` report `0`.

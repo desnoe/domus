@@ -1,5 +1,5 @@
 ---
-- name: Bootstrap base system configuration
+- name: Bootstrap base system access and security
   hosts: all
   become: true
   become_user: root
@@ -8,3 +8,5 @@
     - apt
     - sudo
     - sshd
+
+- ansible.builtin.import_playbook: system.yml

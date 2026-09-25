@@ -1,0 +1,11 @@
+---
+- name: Verify storage pools configured
+  when: (crypto_disks | default([])) | length == 0
+  ansible.builtin.fail:
+    msg: "No crypto_disks defined for this host."
+
+- name: Process replacement for configured disk pool
+  ansible.builtin.include_tasks: replace-pool.yml
+  loop: "{{ crypto_disks | default([]) }}"
+  loop_control:
+    loop_var: current_disk

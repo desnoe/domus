@@ -1,6 +1,6 @@
 ---
 wipe: false
-crypto_base_dir: "/home/{{ ansible_user }}/crypto"
+crypto_base_dir: "/home/{{ ansible_user }}"
 
 btrfs_default_mount_options: "nofail,compress=zstd:3,noatime,user_subvol_rm_allowed"
 

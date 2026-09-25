@@ -17,10 +17,8 @@
 
 - name: "Configure user {{ ansible_user }} with wheel group membership"
   become: true
-  no_log: true
   ansible.builtin.user:
     name: "{{ ansible_user }}"
-    password: "{{ user_password }}"
     groups:
       - wheel
     append: true

@@ -36,7 +36,7 @@ uv run ansible-galaxy collection install -r ansible/requirements.yml -p ansible/
 ```
 
 ### 3. Ansible Vault Password
-All sensitive credentials (`luks_pass`, `user_password`) are encrypted using `ansible-vault`. Ensure your vault password is saved in `~/.ansible_vault_pass` with restricted permissions:
+All sensitive credentials (`luks_pass`) are encrypted using `ansible-vault`. Ensure your vault password is saved in `~/.ansible_vault_pass` with restricted permissions:
 
 ```bash
 echo "YOUR_VAULT_PASSWORD" > ~/.ansible_vault_pass
@@ -53,13 +53,11 @@ The repository uses a clear variable precedence structure:
 | :--- | :--- | :--- | :--- |
 | **Global Defaults** | `ansible/envs/<env>/group_vars/all/main.yml` | Common across all hosts | `crypto_base_dir`, `ansible_user` |
 | **Host Variables** | `ansible/envs/<env>/host_vars/<host>/main.yml` | Device layout & backup targets | `crypto_disks`, `rclone_jobs` |
-| **Encrypted Secrets** | `ansible/envs/<env>/host_vars/<host>/vault.yml` | Passphrases & sensitive hashes | `luks_pass`, `user_password` |
+| **Encrypted Secrets** | `ansible/envs/<env>/host_vars/<host>/vault.yml` | Storage decryption passphrases | `luks_pass` |
 
-### User Password (`user_password`)
-The `user_password` variable holds the `sha512crypt` password hash for the primary user account (`ansible_user`):
-- It is defined in each host's encrypted **`ansible/envs/<env>/host_vars/<host>/vault.yml`**.
-- It is consumed by the **`sudo`** role (`ansible/roles/sudo/tasks/main.yml`) with `no_log: true`.
-- An unencrypted reference template is provided in [`ansible/vault.yml.example`](ansible/vault.yml.example).
+### User Authentication & Storage Passphrases
+- **Storage Passphrase (`luks_pass`)**: The decryption passphrase for LUKS block devices is encrypted in each host's **`ansible/envs/<env>/host_vars/<host>/vault.yml`** and consumed by the **`crypto`** role. An unencrypted reference template is provided in [`ansible/vault.yml.example`](ansible/vault.yml.example).
+- **User Login & Sudo**: Human user passwords are set during the initial Debian OS installation and are **never stored or managed in version control**. Ansible manages authorized SSH keys (`sshd` role) and passwordless sudo privileges via `/etc/sudoers.d/99-ansible-wheel` (`sudo` role).
 
 To view or edit secrets:
 ```bash
@@ -76,34 +74,50 @@ uv run ansible-vault edit ansible/envs/lab/host_vars/debian.delarche.fr/vault.ym
 
 Always run playbooks using `uv run` from the repository root:
 
-### 1. Bootstrap a Fresh Debian Server
-Run against a freshly installed minimal Debian host with root password:
+### 1. Bootstrap a Fresh Debian Server (Day 0)
+Configures initial administrative access (SSH keys, passwordless sudo via `wheel`) and automatically chains full system baseline configuration:
 ```bash
-uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/bootstrap.yml -k -K
+uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/bootstrap.yml -K
 ```
 
-### 2. Full Server Reconfiguration & Storage Unlock
-Applies baseline hardening, unlocks LUKS, mounts Btrfs subvolumes, and configures backup crons:
+### 2. Configure System Baseline (OS & Security)
+Applies package updates, base tools, firewall (`iptables`), time sync (`chrony`/`ntp`), user configuration, and SSH hardening without touching storage:
 ```bash
-uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/reconfigure-and-decrypt.yml
+uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml
 ```
 
 ### 3. Unlock Storage After Server Reboot
-Quickly unlocks LUKS and mounts partitions without re-running system hardening roles:
+Quickly unlocks LUKS containers, scans multi-device Btrfs pools, and mounts subvolumes:
 ```bash
-uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/decrypt-only.yml
+uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/storage-unlock.yml
 ```
 
-### 4. Wipe & Re-encrypt Storage (Destructive)
-Unmounts, wipes existing LUKS containers, re-formats, and re-creates declarative Btrfs subvolumes:
+### 4. Wipe & Reset Storage (Destructive)
+Unmounts, wipes LUKS containers, re-encrypts, formats fresh Btrfs multi-device RAID1, and sets up subvolumes. Includes an interactive confirmation prompt:
 ```bash
-uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/wipe-and-reencrypt.yml
+uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-wipe-and-reset.yml
 ```
 
-### 5. Check Storage and System Health (Read-Only)
-Inspects LUKS encryption status, header backup presence, Btrfs allocation/compression, and snapshots:
+### 5. Replace a Failed Disk in Btrfs RAID1
+Assisted workflow to format LUKS on a replacement drive, mount degraded if necessary, execute `btrfs replace start`, and backup the new LUKS header:
 ```bash
+uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-replace.yml
+```
+
+### 6. Configure Backup Services (Snapshots & Rclone)
+Deploys `snapshot.sh`, `rclone.sh`, and user crontabs for automated Btrfs snapshotting and cloud sync:
+```bash
+uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/backup.yml
+```
+
+### 7. Check Storage and System Health (Read-Only)
+Inspects LUKS encryption status, header backup presence, SMART health, Btrfs usage/error stats, recent snapshots, and rclone logs:
+```bash
+# Full health report
 uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml
+
+# Scoped report using tags
+uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags crypto
 ```
 
 ---

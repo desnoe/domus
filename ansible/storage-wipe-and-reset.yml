@@ -1,0 +1,20 @@
+---
+- name: Wipe, re-encrypt, and format encrypted storage
+  hosts: crypto
+  become: true
+  vars_prompt:
+    - name: wipe_confirmation
+      prompt: "WARNING: This will permanently wipe and reformat all encrypted disks on target hosts. Type 'WIPE' to proceed"
+      private: false
+  pre_tasks:
+    - name: Verify wipe confirmation
+      ansible.builtin.fail:
+        msg: "Aborting: Wipe confirmation not given ('WIPE' required, or confirm_wipe=yes extra var)."
+      when:
+        - (wipe_confirmation | default('')) != 'WIPE'
+        - not (confirm_wipe | default(false) | bool)
+
+  vars:
+    wipe: true
+  roles:
+    - crypto

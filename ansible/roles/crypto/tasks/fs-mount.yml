@@ -19,12 +19,23 @@
 
 - name: "Ensure Btrfs subvolumes exist: {{ disk_name }}"
   become: true
-  community.general.btrfs_subvolume:
-    name: "{{ item.name }}"
-    filesystem_label: "{{ disk_name }}"
-    automount: true
-    state: present
-  loop: "{{ disk_subvolumes }}"
+  ansible.builtin.shell:
+    cmd: |
+      set -e
+      tmpdir=$(mktemp -d)
+      trap 'umount "$tmpdir" 2>/dev/null || true; rmdir "$tmpdir" 2>/dev/null || true' EXIT
+      mount -o noatime,subvolid=5 LABEL={{ disk_name }} "$tmpdir"
+      created=0
+      {% for subvol in disk_subvolumes %}
+      if ! btrfs subvolume show "$tmpdir/{{ subvol.name }}" >/dev/null 2>&1; then
+        btrfs subvolume create "$tmpdir/{{ subvol.name }}"
+        created=1
+      fi
+      {% endfor %}
+      exit $((created == 1 ? 100 : 0))
+  register: btrfs_subvol_create
+  changed_when: btrfs_subvol_create.rc == 100
+  failed_when: btrfs_subvol_create.rc not in [0, 100]
 
 - name: "Ensure subvolume mount directories exist: {{ disk_name }}"
   become: true

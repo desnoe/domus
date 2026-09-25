@@ -1,0 +1,17 @@
+---
+- name: Report status when no encrypted storage is configured
+  when: (crypto_disks | default([])) | length == 0
+  ansible.builtin.debug:
+    msg: |
+      =======================================================
+      STORAGE HEALTH & STATUS REPORT: {{ inventory_hostname }}
+      Date: {{ ansible_date_time.iso8601 | default('N/A') }}
+      =======================================================
+      Notice: No encrypted disks configured on this host (crypto_disks is empty).
+      =======================================================
+
+- name: Query status for each configured disk pool
+  ansible.builtin.include_tasks: status-pool.yml
+  loop: "{{ crypto_disks | default([]) }}"
+  loop_control:
+    loop_var: current_disk

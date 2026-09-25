@@ -6,12 +6,31 @@
   register: active_crypt_holders
   changed_when: false
 
-- name: "Close any active encrypted mapper on device: {{ dev_item }}"
-  become: true
-  ansible.builtin.command:
-    cmd: "cryptsetup luksClose {{ item }}"
-  loop: "{{ active_crypt_holders.stdout_lines }}"
+- name: "Unmount any filesystems using active mapper and close mapper on device: {{ dev_item }}"
   when: active_crypt_holders.stdout_lines | length > 0
+  become: true
+  ansible.builtin.shell:
+    cmd: |
+      set -e
+      uuid=$(blkid -s UUID -o value "/dev/mapper/{{ item }}" 2>/dev/null || true)
+      label=$(blkid -s LABEL -o value "/dev/mapper/{{ item }}" 2>/dev/null || true)
+      if [ -n "$uuid" ]; then
+        for mp in $(findmnt -rn -o TARGET,UUID | awk -v u="$uuid" '$2 == u {print $1}'); do
+          umount "$mp" 2>/dev/null || true
+        done
+      fi
+      if [ -n "$label" ]; then
+        for mp in $(awk -v l="LABEL=$label" '$1 == l {print $2}' /etc/fstab); do
+          umount "$mp" 2>/dev/null || true
+        done
+        sed -i "/^LABEL=${label}[[:space:]]/d" /etc/fstab
+      fi
+      umount "/dev/mapper/{{ item }}" 2>/dev/null || true
+      btrfs device scan --forget "/dev/mapper/{{ item }}" 2>/dev/null || true
+      cryptsetup luksClose "{{ item }}"
+      rm -f "/var/backups/luks/luks-header-{{ item }}.img"
+  loop: "{{ active_crypt_holders.stdout_lines }}"
+  changed_when: true
 
 - name: "Format LUKS encrypted device: {{ dev_item }}"
   become: true
@@ -19,6 +38,7 @@
   ansible.builtin.command:
     cmd: "cryptsetup luksFormat -q -v -c aes-xts-plain64 -h sha256 {{ dev_item }} --key-file -"
     stdin: "{{ disk_passphrase }}"
+  changed_when: true
 
 - name: "Remove stale LUKS header backup if wiping: {{ disk_name }}-{{ dev_idx }}"
   become: true

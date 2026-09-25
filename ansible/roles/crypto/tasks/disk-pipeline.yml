@@ -7,13 +7,17 @@
     disk_base_mount: "{{ disk.mount_point | default(crypto_base_dir + '/' + disk.name) }}"
     disk_subvolumes: "{{ disk.subvolumes | default(btrfs_default_subvolumes) }}"
 
-- name: "Unmount Btrfs subvolumes before wipe: {{ disk_name }}"
+- name: "Unmount subvolumes and clean fstab entries before wipe: {{ disk_name }}"
   when: wipe | default(false) | bool
   become: true
-  ansible.posix.mount:
-    path: "{{ item.mount_point | default(disk_base_mount + '/' + item.name) }}"
-    state: unmounted
-  loop: "{{ disk_subvolumes }}"
+  ansible.builtin.shell:
+    cmd: |
+      set -e
+      for mp in $(awk '$1 == "LABEL={{ disk_name }}" {print $2}' /etc/fstab); do
+        umount "$mp" 2>/dev/null || true
+      done
+      sed -i '/^LABEL={{ disk_name }}[[:space:]]/d' /etc/fstab
+  changed_when: true
 
 - name: "(re-)encrypt member devices: {{ disk_name }}"
   when: wipe | default(false) | bool
@@ -30,12 +34,6 @@
     loop_var: dev_item
     index_var: dev_idx
 
-- name: "Scan for multi-device Btrfs pools: {{ disk_name }}"
-  become: true
-  ansible.builtin.command:
-    cmd: "btrfs device scan"
-  changed_when: false
-
 - name: "Backup LUKS headers for member devices: {{ disk_name }}"
   ansible.builtin.include_tasks: header-backup.yml
   loop: "{{ disk_devices }}"
@@ -46,6 +44,12 @@
 - name: "(re-)set filesystem: {{ disk_name }}"
   when: wipe | default(false) | bool
   ansible.builtin.include_tasks: fs-reset.yml
+
+- name: "Scan for multi-device Btrfs pools: {{ disk_name }}"
+  become: true
+  ansible.builtin.command:
+    cmd: "btrfs device scan"
+  changed_when: false
 
 - name: "Mount Btrfs subvolumes: {{ disk_name }}"
   ansible.builtin.include_tasks: fs-mount.yml

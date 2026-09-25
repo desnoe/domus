@@ -1,6 +1,6 @@
 ---
 snapshot_user: "{{ ansible_user }}"
 snapshot_jobs: []
-crypto_base_dir: "/home/{{ ansible_user }}/crypto"
+crypto_base_dir: "/home/{{ ansible_user }}"
 snapshot_keep_daily: 30
 snapshot_keep_weekly: 52
