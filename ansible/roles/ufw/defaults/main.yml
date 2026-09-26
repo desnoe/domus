@@ -1,0 +1,10 @@
+---
+ufw_default_incoming_policy: deny
+ufw_default_outgoing_policy: allow
+ufw_default_routed_policy: deny
+
+ufw_rules:
+  - port: "22"
+    proto: tcp
+    rule: allow
+    comment: "Allow SSH"

@@ -1,5 +1,11 @@
+unlet! skip_defaults_vim
+source $VIMRUNTIME/defaults.vim
+
 syntax on
-set ts=4
-set sw=4
-set ai
-set nu
+set encoding=utf-8
+set mouse=
+set tabstop=4
+set shiftwidth=4
+set expandtab
+set autoindent
+set number

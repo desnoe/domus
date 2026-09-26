@@ -1,0 +1,29 @@
+---
+- name: Query timedatectl status
+  become: true
+  ansible.builtin.command:
+    cmd: timedatectl status
+  register: ntp_timedatectl_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Query chrony tracking status
+  become: true
+  ansible.builtin.command:
+    cmd: chronyc tracking
+  register: ntp_chronyc_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Display Timezone and NTP Synchronization Summary
+  ansible.builtin.debug:
+    msg: |-
+      =======================================================
+      TIME & NTP STATUS REPORT: {{ inventory_hostname }}
+      =======================================================
+      --- TIMEDATECTL ---
+      {{ ntp_timedatectl_cmd.stdout | default('timedatectl unavailable.', true) }}
+
+      --- CHRONY TRACKING & LEAP STATUS ---
+      {{ ntp_chronyc_cmd.stdout | default('chronyc unavailable.', true) }}
+      =======================================================

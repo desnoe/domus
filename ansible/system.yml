@@ -6,9 +6,9 @@
     - apt
     - base
     - htop
-    - iptables
     - locales
     - ntp
     - sshd
     - sudo
+    - ufw
     - vim

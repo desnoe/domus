@@ -1,0 +1,6 @@
+---
+- name: Update console keymap
+  become: true
+  ansible.builtin.command:
+    cmd: setupcon --save-only
+  changed_when: true

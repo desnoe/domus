@@ -13,7 +13,7 @@ Infrastructure as Code (IaC) repository for provisioning, hardening, and managin
 - **Automated Backups**:
   - Daily read-only Btrfs snapshots scheduled via cron at 05:00.
   - Multi-cloud synchronization via `rclone` (OneDrive and S3) scheduled at 04:00.
-- **System Hardening**: Baseline configuration covering `iptables` firewall, SSH keys, locales, NTP, and administration tools.
+- **System Hardening**: Baseline configuration covering `ufw` firewall (dual-stack IPv4/IPv6), SSH keys, locales, NTP, and administration tools.
 
 ---
 
@@ -82,7 +82,7 @@ uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/bootstrap.yml 
 ```
 
 ### 2. Configure System Baseline (OS & Security)
-Applies package updates, base tools, firewall (`iptables`), time sync (`chrony`/`ntp`), user configuration, and SSH hardening without touching storage:
+Applies package updates, base tools, firewall (`ufw`), time sync (`chrony`/`ntp`), user configuration, and SSH hardening without touching storage:
 ```bash
 uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml
 ```
@@ -112,12 +112,12 @@ uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/backup.yml
 ```
 
 ### 7. Check Storage and System Health (Read-Only)
-Inspects LUKS encryption status, header backup presence, SMART health, Btrfs usage/error stats, recent snapshots, and rclone logs:
+Inspects base system identity/uptime, locales/keyboard, time/NTP sync, UFW firewall status, LUKS encryption status, header backup presence, SMART health, Btrfs usage/error stats, recent snapshots, and rclone logs:
 ```bash
 # Full health report
 uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml
 
-# Scoped report using tags
+# Scoped report using tags (base, locales, ntp, ufw, crypto, snapshot, rclone)
 uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags crypto
 ```
 

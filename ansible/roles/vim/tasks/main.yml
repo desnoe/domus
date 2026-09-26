@@ -7,6 +7,13 @@
       - vim
     state: present
 
+- name: Set vim.basic as default system editor
+  when: ansible_distribution in ['Debian', 'Ubuntu']
+  become: true
+  community.general.alternatives:
+    name: editor
+    path: /usr/bin/vim.basic
+
 - name: Setup .vimrc for root
   become: true
   ansible.builtin.copy:

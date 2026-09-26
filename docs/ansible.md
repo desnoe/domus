@@ -152,7 +152,7 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 ### 2. `ansible/system.yml`
 - **Purpose**: System-wide baseline configuration, package management, security hardening, and service management. Completely decoupled from storage management.
 - **Target hosts**: `hosts: all`
-- **Roles executed**: `apt`, `base`, `htop`, `iptables`, `locales`, `ntp`, `sshd`, `sudo`, `vim`.
+- **Roles executed**: `apt`, `base`, `htop`, `locales`, `ntp`, `sshd`, `sudo`, `ufw`, `vim`.
 - **Usage**:
   ```bash
   uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml
@@ -200,14 +200,18 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   ```
 
 ### 7. `ansible/status.yml`
-- **Purpose**: Non-destructive, read-only diagnostic playbook reporting LUKS container status, header backups, SMART health, Btrfs usage and error stats, recent snapshots, and recent rclone logs.
-- **Roles executed**: Modularly imports status tasks from `crypto`, `snapshot`, and `rclone` roles.
+- **Purpose**: Non-destructive, read-only diagnostic playbook reporting base host identity/uptime, locales/keyboard layout, time/NTP synchronization, UFW firewall status, LUKS container status, header backups, SMART health, Btrfs usage and error stats, recent snapshots, and recent rclone logs.
+- **Roles executed**: Modularly imports status tasks from `base`, `locales`, `ntp`, `ufw`, `crypto`, `snapshot`, and `rclone` roles.
 - **Usage**:
   ```bash
   # Full health report
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml
 
   # Scoped queries using tags
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags base
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags locales
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags ntp
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags ufw
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags crypto
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags snapshot
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags rclone
@@ -227,14 +231,14 @@ For manual recovery instructions without Ansible, snapshot restoration, or LUKS 
 | Role | Description | Key Managed Files / Services |
 | :--- | :--- | :--- |
 | **`apt`** | Ensures `sudo` and package tools are installed; upgrades system package cache; configures automatic security updates (`unattended-upgrades`). | `apt` cache, `/etc/apt/apt.conf.d/20auto-upgrades` |
-| **`base`** | Installs common utilities (`curl`, `rsync`, `tree`, `wget`, etc.), sets `/etc/hostname`, and installs customized `.bashrc`. | `/etc/hostname`, `~/.bashrc`, `/root/.bashrc` |
+| **`base`** | Installs common utilities (`bash-completion`, `curl`, `git`, `man-db`, `rsync`, `tree`, `unzip`, `wget`), configures the live system hostname via `ansible.builtin.hostname`, and installs customized `.bashrc`. | `/etc/hostname`, `~/.bashrc`, `/root/.bashrc` |
 | **`crypto`** | Manages the full encrypted storage stack across 0, 1, or N volumes (`crypto_disks`) with single or multi-device Btrfs native RAID1: per-device LUKS format/open via memory/stdin, automated LUKS header backups (`/var/backups/luks/`), kernel device scanning (`btrfs device scan`), direct Btrfs formatting with semantic labels and automatic RAID1 mirroring, declarative absolute subvolume mounts with flattened internal subvolume names and zstd compression, label-based fstab integration (`LABEL=<name>`), and monthly Btrfs scrub cron. | `/dev/mapper/<name>-<idx>`, `/var/backups/luks/`, `/etc/fstab` |
-| **`htop`** | Installs `htop` and user configuration. | `~/.config/htop/htoprc` |
-| **`iptables`** | Sets up packet filtering firewall rules and restore handler. | `/etc/network/iptables.up.rules` |
-| **`locales`** | Configures system locales (`en_US.UTF-8`, `fr_FR.UTF-8`). | `/etc/default/locale`, `/etc/locale.gen` |
-| **`ntp`** | Sets timezone (`Europe/Paris`) and configures time synchronization (`chrony` on Debian 12+, `ntp` on Debian <= 11). | `tzdata`, `chrony`/`ntp` service |
+| **`htop`** | Installs `htop` and seeds initial user configuration (`force: false`). | `~/.config/htop/htoprc` |
+| **`locales`** | Generates `en_US.UTF-8` and `fr_FR.UTF-8` locales, configures English system UI (`LANG=en_US.UTF-8`) with French regional categories (`LC_TIME`, `LC_MEASUREMENT`, `LC_PAPER`, `LC_MONETARY=fr_FR.UTF-8`) in `/etc/locale.conf` (symlinked from `/etc/default/locale`), and configures French AZERTY keyboard (`fr`/`latin9`). | `/etc/locale.conf`, `/etc/default/locale`, `/etc/default/keyboard` |
+| **`ntp`** | Sets timezone (`Europe/Paris`) and configures `chrony` (`fr.pool.ntp.org`, `rtcsync`, `leapseclist`, and `leapsecmode slew` for monotonic leap seconds). | `/etc/chrony/chrony.conf`, `tzdata`, `chrony` service |
 | **`rclone`** | Installs `rclone`, sets up sync wrapper script (`/home/{{ ansible_user }}/bin/rclone.sh` with 30-day log rotation in `/home/{{ ansible_user }}/logs`), and configures staggered cron jobs for scheduled cloud backups. | `/home/{{ ansible_user }}/bin/rclone.sh`, user crontab |
 | **`snapshot`** | Manages Btrfs snapshot automation: installs reusable CLI script (`/home/{{ ansible_user }}/bin/snapshot.sh`), and configures declarative crontabs (`snapshot_jobs`) with parallel execution safety (per-destination lockfiles) and configurable retention (30 daily + 52 weekly). | `/home/{{ ansible_user }}/bin/snapshot.sh`, user crontab |
 | **`sshd`** | Hardens SSH configuration (disables root login, disables password authentication) and manages `authorized_keys`. | `/etc/ssh/sshd_config`, `~/.ssh/authorized_keys` |
 | **`sudo`** | Creates `wheel` group, configures `/etc/sudoers.d/99-ansible-wheel` (validated via `visudo`), and configures user `{{ ansible_user }}` with wheel group membership and bash shell without managing local passwords. | `/etc/sudoers.d/99-ansible-wheel`, `/etc/passwd` |
-| **`vim`** | Installs `vim` and provisions `.vimrc` for regular user and root. | `~/.vimrc`, `/root/.vimrc` |
+| **`ufw`** | Configures declarative dual-stack (IPv4/IPv6) packet filtering via `community.general.ufw` (`ufw_rules`), sets default policies (`incoming: deny`, `outgoing: allow`, `routed: deny`), cleans legacy `/etc/network/iptables.up.rules`, and enables `ufw.service` at boot. | `/etc/default/ufw`, `/etc/ufw/user.rules`, `/etc/ufw/user6.rules`, `ufw` service |
+| **`vim`** | Installs `vim`, sets `/usr/bin/vim.basic` as default system `editor`, and provisions `.vimrc` (with `defaults.vim` and disabled mouse capture) for regular user and root. | `~/.vimrc`, `/root/.vimrc`, `editor` alternative |
