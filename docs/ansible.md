@@ -200,8 +200,8 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   ```
 
 ### 7. `ansible/status.yml`
-- **Purpose**: Non-destructive, read-only diagnostic playbook reporting base host identity/uptime, locales/keyboard layout, time/NTP synchronization, UFW firewall status, LUKS container status, header backups, SMART health, Btrfs usage and error stats, recent snapshots, and recent rclone logs.
-- **Roles executed**: Modularly imports status tasks from `base`, `locales`, `ntp`, `ufw`, `crypto`, `snapshot`, and `rclone` roles.
+- **Purpose**: Non-destructive, read-only diagnostic playbook reporting base host identity/uptime, locales/keyboard layout, time/NTP synchronization, SSH daemon settings and authorized key fingerprints, UFW firewall status, LUKS container status, header backups, SMART health, Btrfs usage and error stats, recent snapshots, and recent rclone logs.
+- **Roles executed**: Modularly imports status tasks from `base`, `locales`, `ntp`, `sshd`, `ufw`, `crypto`, `snapshot`, and `rclone` roles.
 - **Usage**:
   ```bash
   # Full health report
@@ -211,6 +211,7 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags base
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags locales
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags ntp
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags sshd
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags ufw
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags crypto
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags snapshot
@@ -238,7 +239,7 @@ For manual recovery instructions without Ansible, snapshot restoration, or LUKS 
 | **`ntp`** | Sets timezone (`Europe/Paris`) and configures `chrony` (`fr.pool.ntp.org`, `rtcsync`, `leapseclist`, and `leapsecmode slew` for monotonic leap seconds). | `/etc/chrony/chrony.conf`, `tzdata`, `chrony` service |
 | **`rclone`** | Installs `rclone`, sets up sync wrapper script (`/home/{{ ansible_user }}/bin/rclone.sh` with 30-day log rotation in `/home/{{ ansible_user }}/logs`), and configures staggered cron jobs for scheduled cloud backups. | `/home/{{ ansible_user }}/bin/rclone.sh`, user crontab |
 | **`snapshot`** | Manages Btrfs snapshot automation: installs reusable CLI script (`/home/{{ ansible_user }}/bin/snapshot.sh`), and configures declarative crontabs (`snapshot_jobs`) with parallel execution safety (per-destination lockfiles) and configurable retention (30 daily + 52 weekly). | `/home/{{ ansible_user }}/bin/snapshot.sh`, user crontab |
-| **`sshd`** | Hardens SSH configuration (disables root login, disables password authentication) and manages `authorized_keys`. | `/etc/ssh/sshd_config`, `~/.ssh/authorized_keys` |
+| **`sshd`** | Automatically discovers all local `~/.ssh/*.pub` public keys and synchronizes them to `~/.ssh/authorized_keys` (`exclusive: true`), and hardens `/etc/ssh/sshd_config` (disables root login and password authentication, validated via `sshd -t -f %s`). | `/etc/ssh/sshd_config`, `~/.ssh/authorized_keys` |
 | **`sudo`** | Creates `wheel` group, configures `/etc/sudoers.d/99-ansible-wheel` (validated via `visudo`), and configures user `{{ ansible_user }}` with wheel group membership and bash shell without managing local passwords. | `/etc/sudoers.d/99-ansible-wheel`, `/etc/passwd` |
 | **`ufw`** | Configures declarative dual-stack (IPv4/IPv6) packet filtering via `community.general.ufw` (`ufw_rules`), sets default policies (`incoming: deny`, `outgoing: allow`, `routed: deny`), cleans legacy `/etc/network/iptables.up.rules`, and enables `ufw.service` at boot. | `/etc/default/ufw`, `/etc/ufw/user.rules`, `/etc/ufw/user6.rules`, `ufw` service |
 | **`vim`** | Installs `vim`, sets `/usr/bin/vim.basic` as default system `editor`, and provisions `.vimrc` (with `defaults.vim` and disabled mouse capture) for regular user and root. | `~/.vimrc`, `/root/.vimrc`, `editor` alternative |

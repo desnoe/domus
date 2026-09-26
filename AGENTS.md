@@ -63,7 +63,7 @@ Playbooks are strictly separated by operational responsibility (no role duplicat
 4. `ansible/storage-wipe-and-reset.yml`: Destructive storage reset with interactive `WIPE` confirmation (`hosts: crypto`).
 5. `ansible/storage-replace.yml`: Guided Btrfs RAID1 member disk replacement (`hosts: crypto`), supporting auto-detection of unformatted/closed disks across multiple pools or targeted replacement via `-e replace_pool=<pool> -e replace_index=<idx>`.
 6. `ansible/backup.yml`: Deploys `snapshot` and `rclone` scripts and crontabs (`hosts: crypto`).
-7. `ansible/status.yml`: Read-only health reporting across `base`, `locales`, `ntp`, `ufw`, `crypto`, `snapshot`, and `rclone` roles (supports `--tags base|locales|ntp|ufw|crypto|snapshot|rclone`).
+7. `ansible/status.yml`: Read-only health reporting across `base`, `locales`, `ntp`, `sshd`, `ufw`, `crypto`, `snapshot`, and `rclone` roles (supports `--tags base|locales|ntp|sshd|ufw|crypto|snapshot|rclone`).
 
 ---
 

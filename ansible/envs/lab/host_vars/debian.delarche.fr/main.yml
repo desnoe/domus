@@ -12,7 +12,7 @@ crypto_disks:
       - /dev/disk/by-id/ata-debian-3_SSD_5E6AYTKT29XMK1XHWJ78
       - /dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK
     subvolumes:
-      - "/home/{{ ansible_user }}/backup/sync"
+      - "/home/{{ ansible_user }}/backup"
 
 snapshot_jobs:
   - name: data

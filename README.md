@@ -112,12 +112,12 @@ uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/backup.yml
 ```
 
 ### 7. Check Storage and System Health (Read-Only)
-Inspects base system identity/uptime, locales/keyboard, time/NTP sync, UFW firewall status, LUKS encryption status, header backup presence, SMART health, Btrfs usage/error stats, recent snapshots, and rclone logs:
+Inspects base system identity/uptime, locales/keyboard, time/NTP sync, SSH daemon/authorized keys, UFW firewall status, LUKS encryption status, header backup presence, SMART health, Btrfs usage/error stats, recent snapshots, and rclone logs:
 ```bash
 # Full health report
 uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml
 
-# Scoped report using tags (base, locales, ntp, ufw, crypto, snapshot, rclone)
+# Scoped report using tags (base, locales, ntp, sshd, ufw, crypto, snapshot, rclone)
 uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags crypto
 ```
 

@@ -41,6 +41,18 @@
         - ntp
         - status
 
+    - name: Report SSH daemon and keys status
+      ansible.builtin.include_role:
+        name: sshd
+        tasks_from: status
+        apply:
+          tags:
+            - sshd
+            - status
+      tags:
+        - sshd
+        - status
+
     - name: Report UFW firewall status
       ansible.builtin.include_role:
         name: ufw
