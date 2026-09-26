@@ -24,6 +24,6 @@
     hour: "{{ item.hour | default('5') }}"
     minute: "{{ item.minute | default('0') }}"
     job: >-
-      /home/{{ snapshot_user }}/bin/snapshot.sh {{ item.source }} {{ item.destination }}
-      {%- if item.keep_daily is defined or item.keep_weekly is defined %} {{ item.keep_daily | default(snapshot_keep_daily) }} {{ item.keep_weekly | default(snapshot_keep_weekly) }}{% endif %}
+      /home/{{ snapshot_user }}/bin/snapshot.sh {{ item.source }} {{ item.destination }}{%- if item.keep_daily is defined or item.keep_weekly is defined %}
+      {{ item.keep_daily | default(snapshot_keep_daily) }} {{ item.keep_weekly | default(snapshot_keep_weekly) }}{% endif %}
   loop: "{{ snapshot_jobs | default([]) }}"

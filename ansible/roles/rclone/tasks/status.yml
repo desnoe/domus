@@ -2,8 +2,11 @@
 - name: Query recent rclone backup logs
   when: (crypto_disks | default([])) | length > 0
   ansible.builtin.shell:
-    cmd: "ls -t /home/{{ ansible_user }}/logs/*/*.log /home/{{ ansible_user }}/logs/*/*/*.log 2>/dev/null | head -n 5"
-  register: recent_logs_cmd
+    executable: /bin/bash
+    cmd: |
+      set -o pipefail
+      ls -t /home/{{ ansible_user }}/logs/*/*.log /home/{{ ansible_user }}/logs/*/*/*.log 2>/dev/null | head -n 5
+  register: rclone_recent_logs_cmd
   changed_when: false
   failed_when: false
 
@@ -14,5 +17,5 @@
       =======================================================
       RCLONE BACKUP LOGS REPORT: {{ inventory_hostname }}
       =======================================================
-      {{ recent_logs_cmd.stdout | default('No rclone logs found.', true) }}
+      {{ rclone_recent_logs_cmd.stdout | default('No rclone logs found.', true) }}
       =======================================================

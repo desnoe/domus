@@ -3,10 +3,11 @@
   hosts: all
   become: true
   become_user: root
-  become_method: su
+  become_method: ansible.builtin.su
   roles:
     - apt
     - sudo
     - sshd
 
-- ansible.builtin.import_playbook: system.yml
+- name: Import system baseline configuration
+  ansible.builtin.import_playbook: system.yml

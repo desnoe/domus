@@ -8,22 +8,23 @@
     group: root
     mode: "0700"
 
-- name: "Check if LUKS header backup exists: {{ disk_name }}-{{ dev_idx }}"
+- name: "Check if LUKS header backup exists: {{ crypto_disk_name ~ '-' ~ dev_idx }}"
   become: true
   ansible.builtin.stat:
-    path: "/var/backups/luks/luks-header-{{ disk_name }}-{{ dev_idx }}.img"
-  register: luks_header_backup
+    path: "/var/backups/luks/luks-header-{{ crypto_disk_name }}-{{ dev_idx }}.img"
+  register: crypto_luks_header_backup
 
-- name: "Backup LUKS header: {{ disk_name }}-{{ dev_idx }}"
+- name: "Backup LUKS header: {{ crypto_disk_name ~ '-' ~ dev_idx }}"
   become: true
   ansible.builtin.command:
-    cmd: "cryptsetup luksHeaderBackup {{ dev_item }} --header-backup-file /var/backups/luks/luks-header-{{ disk_name }}-{{ dev_idx }}.img"
-  when: not luks_header_backup.stat.exists
+    cmd: "cryptsetup luksHeaderBackup {{ dev_item }} --header-backup-file /var/backups/luks/luks-header-{{ crypto_disk_name }}-{{ dev_idx }}.img"
+  when: not crypto_luks_header_backup.stat.exists
+  changed_when: true
 
-- name: "Ensure strict permissions on LUKS header backup file: {{ disk_name }}-{{ dev_idx }}"
+- name: "Ensure strict permissions on LUKS header backup file: {{ crypto_disk_name ~ '-' ~ dev_idx }}"
   become: true
   ansible.builtin.file:
-    path: "/var/backups/luks/luks-header-{{ disk_name }}-{{ dev_idx }}.img"
+    path: "/var/backups/luks/luks-header-{{ crypto_disk_name }}-{{ dev_idx }}.img"
     owner: root
     group: root
     mode: "0400"

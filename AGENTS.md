@@ -22,19 +22,23 @@
 - **Ansible Standards**:
   - `ansible-core` version is pinned in `pyproject.toml`.
   - Collection dependencies are declared with exact versions in `ansible/requirements.yml` and installed locally under `ansible/collections/`.
-  - Always prefer Fully Qualified Collection Names (FQCN) such as `ansible.builtin.*`, `ansible.posix.*`, `community.general.*`, `community.crypto.*`.
+  - Always prefer Fully Qualified Collection Names (FQCN) such as `ansible.builtin.*`, `ansible.posix.*`, `community.general.*`, `community.crypto.*` (including `become_method: ansible.builtin.su`).
   - Avoid deprecated directives (e.g. use `import_tasks` / `include_tasks` instead of `include`).
   - Quote all file permissions (e.g. `mode: "0644"`, `mode: "0755"`).
   - Pass package lists directly to `ansible.builtin.apt` instead of using `with_items` loops.
+  - Prefix all role-internal variables (`defaults`, `set_fact`, `register`) with `<role>_` (e.g. `crypto_*`, `snapshot_*`, `rclone_*`).
+  - Place Jinja2 expressions in task `name:` only at the very end of the string (`name[template]`).
+  - Always specify `changed_when` on `ansible.builtin.command` / `ansible.builtin.shell` tasks, and include `executable: /bin/bash` with `set -o pipefail` whenever using shell pipes.
 
 - **Secrets & Security**:
   - Never commit plaintext secrets, passwords, or password hashes into version control.
-  - Encrypt all secrets using `ansible-vault` with password file `~/.ansible_vault_pass`.
+  - Encrypt all secrets using `ansible-vault` with password file `~/.ansible_vault_pass` (enforced by the `check-ansible-vault` pre-commit hook).
   - Reference documented variables in `ansible/vault.yml.example`.
 
 - **Pre-commit & Code Quality**:
   - All contributions must pass `uv run pre-commit run --all-files` with a clean exit code (`0`).
-  - Linters enforced: `ansible-lint`, `yamllint`, `shellcheck`, and standard `pre-commit-hooks`.
+  - Linters enforced at maximum strictness: `ansible-lint --strict` (`profile: production`), `yamllint --strict` (`level: error`), `shellcheck --severity=style`, `check-ansible-vault`, and `pre-commit-hooks` (`v5.0.0`).
+
 
 ---
 

@@ -2,8 +2,11 @@
 - name: Query recent Btrfs snapshots
   when: (snapshot_jobs | default([])) | length > 0
   ansible.builtin.shell:
-    cmd: "ls -td {% for job in snapshot_jobs %}{{ job.destination }}/* {% endfor %}2>/dev/null | head -n 5"
-  register: recent_snapshots_cmd
+    executable: /bin/bash
+    cmd: |
+      set -o pipefail
+      ls -td {% for job in snapshot_jobs %}{{ job.destination }}/* {% endfor %}2>/dev/null | head -n 5
+  register: snapshot_recent_snapshots_cmd
   changed_when: false
   failed_when: false
 
@@ -14,5 +17,5 @@
       =======================================================
       BTRFS SNAPSHOTS REPORT: {{ inventory_hostname }}
       =======================================================
-      {{ recent_snapshots_cmd.stdout | default('No snapshots found.', true) }}
+      {{ snapshot_recent_snapshots_cmd.stdout | default('No snapshots found.', true) }}
       =======================================================

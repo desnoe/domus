@@ -17,6 +17,6 @@
         - (wipe_confirm.user_input | default('')) != 'WIPE'
 
   vars:
-    wipe: true
+    crypto_wipe: true
   roles:
     - crypto

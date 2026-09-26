@@ -2,16 +2,20 @@
 - name: "Identify any active mapper on device: {{ dev_item }}"
   become: true
   ansible.builtin.shell:
-    cmd: "lsblk -rno NAME,TYPE {{ dev_item }} | awk '$2 == \"crypt\" {print $1}'"
-  register: active_crypt_holders
+    executable: /bin/bash
+    cmd: |
+      set -o pipefail
+      lsblk -rno NAME,TYPE {{ dev_item }} | awk '$2 == "crypt" {print $1}'
+  register: crypto_active_crypt_holders
   changed_when: false
 
 - name: "Unmount any filesystems using active mapper and close mapper on device: {{ dev_item }}"
-  when: active_crypt_holders.stdout_lines | length > 0
+  when: crypto_active_crypt_holders.stdout_lines | length > 0
   become: true
   ansible.builtin.shell:
+    executable: /bin/bash
     cmd: |
-      set -e
+      set -euo pipefail
       uuid=$(blkid -s UUID -o value "/dev/mapper/{{ item }}" 2>/dev/null || true)
       label=$(blkid -s LABEL -o value "/dev/mapper/{{ item }}" 2>/dev/null || true)
       if [ -n "$uuid" ]; then
@@ -29,7 +33,7 @@
       btrfs device scan --forget "/dev/mapper/{{ item }}" 2>/dev/null || true
       cryptsetup luksClose "{{ item }}"
       rm -f "/var/backups/luks/luks-header-{{ item }}.img"
-  loop: "{{ active_crypt_holders.stdout_lines }}"
+  loop: "{{ crypto_active_crypt_holders.stdout_lines }}"
   changed_when: true
 
 - name: "Format LUKS encrypted device: {{ dev_item }}"
@@ -37,11 +41,11 @@
   no_log: true
   ansible.builtin.command:
     cmd: "cryptsetup luksFormat -q -v -c aes-xts-plain64 -h sha256 {{ dev_item }} --key-file -"
-    stdin: "{{ disk_passphrase }}"
+    stdin: "{{ crypto_disk_passphrase }}"
   changed_when: true
 
-- name: "Remove stale LUKS header backup if wiping: {{ disk_name }}-{{ dev_idx }}"
+- name: "Remove stale LUKS header backup if wiping: {{ crypto_disk_name ~ '-' ~ dev_idx }}"
   become: true
   ansible.builtin.file:
-    path: "/var/backups/luks/luks-header-{{ disk_name }}-{{ dev_idx }}.img"
+    path: "/var/backups/luks/luks-header-{{ crypto_disk_name }}-{{ dev_idx }}.img"
     state: absent
