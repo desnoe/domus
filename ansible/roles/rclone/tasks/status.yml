@@ -2,7 +2,7 @@
 - name: Query recent rclone backup logs
   when: (crypto_disks | default([])) | length > 0
   ansible.builtin.shell:
-    cmd: "ls -t {{ crypto_base_dir }}/logs/*/*/*.log 2>/dev/null | head -n 5"
+    cmd: "ls -t /home/{{ ansible_user }}/logs/*/*.log /home/{{ ansible_user }}/logs/*/*/*.log 2>/dev/null | head -n 5"
   register: recent_logs_cmd
   changed_when: false
   failed_when: false

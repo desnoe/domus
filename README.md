@@ -9,7 +9,7 @@ Infrastructure as Code (IaC) repository for provisioning, hardening, and managin
 - **Host Provisioning**: Bootstrap minimal Debian systems with automated user management (`ansible_user`), SSH hardening, and sudo rights.
 - **Layered Storage Security**:
   - **LUKS**: Block-level encryption with AES-256 (`luks_pass`) on each member device.
-  - **Btrfs**: Filesystem management directly on decrypted LUKS containers with native RAID1 mirroring for multi-device pools, declarative subvolumes (`sync` and `snapshots`), transparent zstd compression, and automated fstab integration.
+  - **Btrfs**: Filesystem management directly on decrypted LUKS containers with native RAID1 mirroring for multi-device pools, declarative subvolume mount paths, transparent zstd compression, and automated fstab integration.
 - **Automated Backups**:
   - Daily read-only Btrfs snapshots scheduled via cron at 05:00.
   - Multi-cloud synchronization via `rclone` (OneDrive and S3) scheduled at 04:00.
@@ -51,9 +51,10 @@ The repository uses a clear variable precedence structure:
 
 | Variable Type | Location | Purpose | Examples |
 | :--- | :--- | :--- | :--- |
-| **Global Defaults** | `ansible/envs/<env>/group_vars/all/main.yml` | Common across all hosts | `crypto_base_dir`, `ansible_user` |
-| **Host Variables** | `ansible/envs/<env>/host_vars/<host>/main.yml` | Device layout & backup targets | `crypto_disks`, `rclone_jobs` |
+| **Global Defaults** | `ansible/envs/<env>/group_vars/all/main.yml` | Common across all hosts | `ansible_user` |
+| **Host Variables** | `ansible/envs/<env>/host_vars/<host>/main.yml` | Device layout & backup targets | `crypto_disks`, `snapshot_jobs`, `rclone_jobs` |
 | **Encrypted Secrets** | `ansible/envs/<env>/host_vars/<host>/vault.yml` | Storage decryption passphrases | `luks_pass` |
+
 
 ### User Authentication & Storage Passphrases
 - **Storage Passphrase (`luks_pass`)**: The decryption passphrase for LUKS block devices is encrypted in each host's **`ansible/envs/<env>/host_vars/<host>/vault.yml`** and consumed by the **`crypto`** role. An unencrypted reference template is provided in [`ansible/vault.yml.example`](ansible/vault.yml.example).

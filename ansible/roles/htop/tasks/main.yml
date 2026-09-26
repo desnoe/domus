@@ -8,13 +8,19 @@
     state: present
 
 - name: Check htop base config dir
+  become: true
   ansible.builtin.file:
-    path: "~/.config/htop"
+    path: "/home/{{ ansible_user }}/.config/htop"
     state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
     mode: "0700"
 
 - name: Setup htoprc
+  become: true
   ansible.builtin.copy:
     src: "htoprc"
-    dest: "~/.config/htop/htoprc"
+    dest: "/home/{{ ansible_user }}/.config/htop/htoprc"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
     mode: "0644"

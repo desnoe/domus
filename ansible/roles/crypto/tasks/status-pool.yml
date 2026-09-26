@@ -1,7 +1,7 @@
 ---
 - name: "Set facts for disk query: {{ current_disk.name }}"
   ansible.builtin.set_fact:
-    query_disk_mount: "{{ current_disk.mount_point | default(crypto_base_dir + '/' + current_disk.name + '/' + (current_disk.subvolumes[0].name if current_disk.subvolumes is defined and current_disk.subvolumes | length > 0 else 'sync')) }}"
+    query_disk_mount: "{{ current_disk.subvolumes[0] }}"
 
 - name: "Query LUKS status for pool members: {{ current_disk.name }}"
   ansible.builtin.command:
@@ -53,8 +53,9 @@
       Target Devices: {{ current_disk.devices | join(', ') }}
       LUKS Containers: {% for i in range(current_disk.devices | length) %}/dev/mapper/{{ current_disk.name }}-{{ i }} {% endfor %}
 
-      Mount Point: {{ query_disk_mount }}
+      Subvolume Mounts: {{ current_disk.subvolumes | join(', ') }}
       =======================================================
+
 
       --- MEMBER DEVICES (LUKS & SMART) ---
       {% for res in luks_status_cmds.results %}

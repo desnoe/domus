@@ -1,11 +1,17 @@
 ---
+- name: "Verify subvolumes are defined for disk pool: {{ disk.name }}"
+  ansible.builtin.assert:
+    that:
+      - disk.subvolumes is defined
+      - disk.subvolumes | length > 0
+    fail_msg: "Pool '{{ disk.name }}' must define at least one absolute mount path in 'subvolumes'."
+
 - name: "Set operational facts for disk: {{ disk.name }}"
   ansible.builtin.set_fact:
     disk_name: "{{ disk.name }}"
     disk_devices: "{{ disk.devices }}"
     disk_passphrase: "{{ disk.passphrase | default(luks_pass) }}"
-    disk_base_mount: "{{ disk.mount_point | default(crypto_base_dir + '/' + disk.name) }}"
-    disk_subvolumes: "{{ disk.subvolumes | default(btrfs_default_subvolumes) }}"
+    disk_subvolumes: "{{ disk.subvolumes }}"
 
 - name: "Unmount subvolumes and clean fstab entries before wipe: {{ disk_name }}"
   when: wipe | default(false) | bool

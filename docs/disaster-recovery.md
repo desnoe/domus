@@ -12,10 +12,10 @@ Each encrypted server (`debian.delarche.fr`, `kodlix.delarche.fr`, `zotac.delarc
 flowchart TD
     Disk0["Physical Device 0 (/dev/disk/by-id/...)"] -->|cryptsetup luksOpen| Mapper0["Mapper Device (/dev/mapper/data-0)"]
     Disk1["Physical Device 1 (/dev/disk/by-id/...)"] -->|cryptsetup luksOpen| Mapper1["Mapper Device (/dev/mapper/data-1)"]
-    Mapper0 -->|"Btrfs RAID1 (LABEL=data)"| BtrfsRoot["Btrfs Root (~/data)"]
+    Mapper0 -->|"Btrfs RAID1 (LABEL=data)"| BtrfsRoot["Btrfs Root (subvolid=5)"]
     Mapper1 -->|"Btrfs RAID1 (LABEL=data)"| BtrfsRoot
-    BtrfsRoot --> SubvolSync["Subvolume: sync (~/data/sync)"]
-    BtrfsRoot --> SubvolSnap["Subvolume: snapshots (~/data/snapshots)"]
+    BtrfsRoot --> SubvolSync["Subvolume: home_olivier_data_sync (/home/olivier/data/sync)"]
+    BtrfsRoot --> SubvolSnap["Subvolume: home_olivier_data_snapshots (/home/olivier/data/snapshots)"]
 ```
 
 - **Passphrase**: Encrypted in Ansible Vault as `luks_pass`.
@@ -47,15 +47,15 @@ sudo btrfs device scan
 ```
 
 ### 3. Mount the Btrfs subvolumes
-Mount by label (`LABEL=data`) so Btrfs automatically mounts the complete pool:
+Mount by label (`LABEL=data`) so Btrfs automatically mounts the complete pool (internal subvolume names flatten the absolute mount path with underscores):
 ```bash
 sudo mkdir -p /mnt/recovery/data/sync /mnt/recovery/data/snapshots
 
 # Mount the sync working tree
-sudo mount -t btrfs -o subvol=sync,compress=zstd:3,noatime LABEL=data /mnt/recovery/data/sync
+sudo mount -t btrfs -o subvol=home_olivier_data_sync,compress=zstd:3,noatime LABEL=data /mnt/recovery/data/sync
 
 # Mount the snapshots tree
-sudo mount -t btrfs -o subvol=snapshots,compress=zstd:3,noatime LABEL=data /mnt/recovery/data/snapshots
+sudo mount -t btrfs -o subvol=home_olivier_data_snapshots,compress=zstd:3,noatime LABEL=data /mnt/recovery/data/snapshots
 ```
 
 ### 4. Unmount and close after operations
@@ -145,6 +145,9 @@ If the storage pool uses Btrfs RAID1 mirroring across multiple disks, data is sa
        devices:
          - /dev/disk/by-id/ata-Samsung_SSD_870_EVO_<surviving_disk>
          - /dev/disk/by-id/ata-Samsung_SSD_870_EVO_<new_replacement_disk>
+       subvolumes:
+         - "/home/{{ ansible_user }}/data/sync"
+         - "/home/{{ ansible_user }}/data/snapshots"
    ```
 
 3. **Run the guided replacement playbook**:
@@ -152,12 +155,12 @@ If the storage pool uses Btrfs RAID1 mirroring across multiple disks, data is sa
    uv run ansible-playbook -i ansible/envs/<env>/inventory.ini ansible/storage-replace.yml
    ```
    This automated workflow:
-   - Detects the unformatted replacement disk in `crypto_disks`.
+   - Detects the unformatted replacement disk in `crypto_disks` (or targets a specific pool/member via `-e replace_pool=<pool> -e replace_index=<idx>`).
    - Prompts for explicit confirmation before proceeding.
    - Formats LUKS on the new disk with `luks_pass` and opens `/dev/mapper/<pool>-<idx>`.
    - Mounts the filesystem degraded if a missing drive prevented standard mounting.
    - Triggers `btrfs replace start` to stream mirrored data from surviving disks into the new disk.
-   - Saves a new LUKS header backup to `/var/backups/luks/`.
+   - Saves a new LUKS header backup to `/var/backups/luks/` and remounts all subvolumes cleanly.
 
 4. **Verify replacement status**:
    ```bash
@@ -186,8 +189,8 @@ When replacing all disks simultaneously or resetting an entire pool from scratch
 
 4. **Trigger initial cloud restore**:
    ```bash
-   $HOME/bin/rclone.sh onedrive
-   $HOME/bin/rclone.sh S3 delarche-images
+   $HOME/bin/rclone.sh onedrive $HOME/data/sync
+   $HOME/bin/rclone.sh S3 $HOME/data/sync delarche-images
    ```
 
 ---
@@ -198,9 +201,9 @@ A monthly scrub cron job is automatically configured. To manually run and check 
 
 ```bash
 # Start scrub in foreground with progress
-sudo btrfs scrub start -B ~/data
+sudo btrfs scrub start -B ~/data/sync
 
 # Check last scrub status and error counters
-sudo btrfs scrub status ~/data
+sudo btrfs scrub status ~/data/sync
 ```
 Verify that `csum_errors`, `verify_errors`, and `uncorrectable_errors` report `0`.

@@ -4,8 +4,24 @@
   ansible.builtin.fail:
     msg: "No crypto_disks defined for this host."
 
+- name: Initialize replacement counter
+  ansible.builtin.set_fact:
+    replaced_pools_count: 0
+
 - name: Process replacement for configured disk pool
   ansible.builtin.include_tasks: replace-pool.yml
   loop: "{{ crypto_disks | default([]) }}"
   loop_control:
     loop_var: current_disk
+  when:
+    - replace_pool is not defined or current_disk.name == replace_pool
+    - replace_index is not defined or (replace_pool is defined and current_disk.name == replace_pool) or (replace_pool is not defined and current_disk.name == crypto_disks[0].name)
+
+- name: Verify at least one replacement candidate was processed
+  when: replaced_pools_count | int == 0
+  ansible.builtin.fail:
+    msg: >-
+      No unformatted or closed candidate device detected in configured pools.
+      All configured devices are active. If you replaced a physical disk, update
+      host_vars/<host>/main.yml with the new device by-id path, or specify
+      -e replace_pool=<pool_name> -e replace_index=<idx>.

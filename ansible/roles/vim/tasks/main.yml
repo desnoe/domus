@@ -12,10 +12,15 @@
   ansible.builtin.copy:
     src: "vimrc"
     dest: "/root/.vimrc"
+    owner: root
+    group: root
     mode: "0644"
 
 - name: Setup .vimrc for user
+  become: true
   ansible.builtin.copy:
     src: "vimrc"
-    dest: "~/.vimrc"
+    dest: "/home/{{ ansible_user }}/.vimrc"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
     mode: "0644"

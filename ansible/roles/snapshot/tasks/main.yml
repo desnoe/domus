@@ -2,7 +2,7 @@
 - name: Ensure bin directory exists
   become: true
   ansible.builtin.file:
-    path: "{{ crypto_base_dir }}/bin"
+    path: "/home/{{ snapshot_user }}/bin"
     state: directory
     mode: "0755"
     owner: "{{ snapshot_user }}"
@@ -12,7 +12,7 @@
   when: ansible_distribution in ['Debian', 'Ubuntu']
   ansible.builtin.copy:
     src: "snapshot.sh"
-    dest: "{{ crypto_base_dir }}/bin/snapshot.sh"
+    dest: "/home/{{ snapshot_user }}/bin/snapshot.sh"
     mode: "0755"
     owner: "{{ snapshot_user }}"
     group: "{{ snapshot_user }}"
@@ -24,6 +24,6 @@
     hour: "{{ item.hour | default('5') }}"
     minute: "{{ item.minute | default('0') }}"
     job: >-
-      {{ crypto_base_dir }}/bin/snapshot.sh {{ item.source }} {{ item.destination }}
+      /home/{{ snapshot_user }}/bin/snapshot.sh {{ item.source }} {{ item.destination }}
       {%- if item.keep_daily is defined or item.keep_weekly is defined %} {{ item.keep_daily | default(snapshot_keep_daily) }} {{ item.keep_weekly | default(snapshot_keep_weekly) }}{% endif %}
   loop: "{{ snapshot_jobs | default([]) }}"

@@ -12,10 +12,10 @@ The infrastructure runs on Debian hosts (`lab` and `live` environments). For hos
 flowchart TD
     Disk0["Physical Disk 0 (/dev/disk/by-id/...)"] -->|LUKS AES-256| LUKS0["Decrypted Mapper (/dev/mapper/data-0)"]
     Disk1["Physical Disk 1 (/dev/disk/by-id/...)"] -->|LUKS AES-256| LUKS1["Decrypted Mapper (/dev/mapper/data-1)"]
-    LUKS0 -->|"Btrfs RAID1 Pool (LABEL=data)"| RootBtrfs["Btrfs Root (Mounted at ~/data)"]
+    LUKS0 -->|"Btrfs RAID1 Pool (LABEL=data)"| RootBtrfs["Btrfs Root (subvolid=5)"]
     LUKS1 -->|"Btrfs RAID1 Pool (LABEL=data)"| RootBtrfs
-    RootBtrfs --> SubvolSync["Subvolume: sync (Mounted at ~/data/sync)"]
-    RootBtrfs --> SubvolSnap["Subvolume: snapshots (Mounted at ~/data/snapshots)"]
+    RootBtrfs --> SubvolSync["Subvolume: home_olivier_data_sync (Mounted at /home/olivier/data/sync)"]
+    RootBtrfs --> SubvolSnap["Subvolume: home_olivier_data_snapshots (Mounted at /home/olivier/data/snapshots)"]
     Cloud["Cloud Storage (OneDrive, S3)"] -->|"Staggered Rclone Cron (04:00, 04:15, ...)"| SubvolSync
     SubvolSync -->|"Daily Snapshot Cron (05:00, 30-daily + 52-weekly retention)"| SubvolSnap
 ```
@@ -32,11 +32,11 @@ flowchart TD
    - Btrfs native RAID1 provides two copies of all data and metadata across distinct devices, offering self-healing checksum repair during read operations and monthly scrubs without requiring mdadm or hardware RAID.
    - For single-device pools (`devices | length == 1`), standard Btrfs profile is created.
 
-3. **Label-Based Mounting & Dynamic Discovery (`/etc/fstab`)**:
+3. **Label-Based Mounting & Flattened Subvolume Naming (`/etc/fstab`)**:
    - Btrfs pools are initialized with filesystem label `-L {{ disk_name }}`.
    - `btrfs device scan` registers all opened member mappers with the kernel.
    - Subvolumes are mounted in `/etc/fstab` using `src: "LABEL={{ disk_name }}"` (e.g. `LABEL=data`), guaranteeing clean pool assembly regardless of device enumeration order.
-   - Subvolumes are nested within the volume directory at `{{ crypto_base_dir }}/<disk_name>/<subvol>` (e.g. `{{ crypto_base_dir }}/data/sync`, `{{ crypto_base_dir }}/data/snapshots`) with options `noauto,nofail,compress=zstd:3,noatime,user_subvol_rm_allowed,subvol=<subvol>`.
+   - Each entry in `subvolumes` is an explicit absolute mount path (e.g. `/home/{{ ansible_user }}/data/sync`). Its internal Btrfs subvolume name is deterministically derived by flattening slashes into underscores (`home_olivier_data_sync`) and mounted with options `noauto,nofail,compress=zstd:3,noatime,user_subvol_rm_allowed,subvol=<flattened_name>`.
    - `noauto,nofail`: Ensures the host boots reliably without emergency shell drops before encrypted LUKS containers are unlocked.
    - `user_subvol_rm_allowed`: Enables snapshot rotation by `ansible_user` without root elevation.
    - `compress=zstd:3`: Transparent filesystem-level compression reducing flash wear and disk space usage.
@@ -68,45 +68,46 @@ Understanding where variables are defined is essential for maintaining and provi
 ### 1. Global Variables (`ansible/envs/<env>/group_vars/all/main.yml`)
 Defines shared settings across all hosts:
 - `ansible_user`: Remote SSH and primary system username (e.g. `olivier`).
-- `crypto_base_dir`: Base destination path for decrypted mounts (default: `"/home/{{ ansible_user }}"`).
 
 > [!NOTE]
 > Python interpreter discovery is centralized in `ansible.cfg` via `interpreter_python = auto_silent`, automatically detecting `/usr/bin/python3` across target Debian systems.
 
 ### 2. Host Public Variables (`ansible/envs/<env>/host_vars/<hostname>/main.yml`)
 Configures hardware layout and backup targets:
-- `crypto_disks`: Declarative list of encrypted storage pools to manage (supports 0, 1, or multiple volumes). Each volume can contain 1 or N underlying physical disks (`devices: [...]`). When multiple devices are declared, Btrfs automatically formats native RAID1 (`-d raid1 -m raid1`). If `subvolumes` is omitted, it defaults to `btrfs_default_subvolumes` (`sync` and `snapshots`), nested under `{{ crypto_base_dir }}/<name>/`:
+- `crypto_disks`: Declarative list of encrypted storage pools to manage (supports 0, 1, or multiple volumes). Each volume can contain 1 or N underlying physical disks (`devices: [...]`) and a mandatory list of absolute mount paths (`subvolumes: [...]`). When multiple devices are declared, Btrfs automatically formats native RAID1 (`-d raid1 -m raid1`):
   ```yaml
   crypto_disks:
     - name: data       # Semantic volume name (label: data, mappers: /dev/mapper/data-0, data-1...)
       devices:
         - /dev/disk/by-id/ata-debian-1_SSD_...
         # - /dev/disk/by-id/ata-debian-2_SSD_... (Optional: add 2nd disk for Btrfs RAID1)
-      # Optional: custom subvolumes (defaults to sync & snapshots under crypto_base_dir/data)
-      # subvolumes:
-      #   - name: sync
-      #   - name: snapshots
+      subvolumes:
+        - "/home/{{ ansible_user }}/data/sync"
+        - "/home/{{ ansible_user }}/data/snapshots"
   ```
 - `snapshot_jobs`: Declarative list of Btrfs snapshot jobs scheduled via crontab:
   ```yaml
   snapshot_jobs:
     - name: data
-      source: "{{ crypto_base_dir }}/data/sync"
-      destination: "{{ crypto_base_dir }}/data/snapshots"
+      source: "/home/{{ ansible_user }}/data/sync"
+      destination: "/home/{{ ansible_user }}/data/snapshots"
       # optional retention & schedule:
       # keep_daily: 30
       # keep_weekly: 52
       # hour: "5"
       # minute: "0"
   ```
-- `rclone_jobs`: List of cloud remotes and buckets to sync via rclone:
+- `rclone_jobs`: List of cloud remotes, buckets, and target destination directories to sync via rclone:
   ```yaml
   rclone_jobs:
     - provider: onedrive
       bucket: ""
+      destination: "/home/{{ ansible_user }}/data/sync"
     - provider: S3
       bucket: delarche-images
+      destination: "/home/{{ ansible_user }}/data/sync"
   ```
+
 
 ### 3. Encrypted Secrets (`ansible/envs/<env>/host_vars/<hostname>/vault.yml`)
 > [!IMPORTANT]
@@ -179,10 +180,14 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 ### 5. `ansible/storage-replace.yml`
 - **Purpose**: Guided workflow to replace a failed member disk in a Btrfs RAID1 pool.
 - **Target hosts**: `hosts: crypto`
-- **Workflow**: Auto-detects the new device from `host_vars`, ensures Btrfs is mounted (degraded if necessary), prompts for confirmation, formats LUKS, opens mapper, runs `btrfs replace start`, and creates a LUKS header backup.
+- **Workflow**: Auto-detects unformatted or closed devices across pools in `crypto_disks` (or targets a specific pool/member via `-e replace_pool=<pool> -e replace_index=<idx>`), ensures Btrfs is mounted (degraded if necessary), prompts for confirmation, formats LUKS, opens mapper, runs `btrfs replace start`, creates a LUKS header backup, and remounts all subvolumes cleanly.
 - **Usage**:
   ```bash
+  # Auto-detect unformatted/closed disk across all pools
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-replace.yml
+
+  # Target a specific pool and member index explicitly
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-replace.yml -e replace_pool=data -e replace_index=0
   ```
 
 ### 6. `ansible/backup.yml`
@@ -223,13 +228,13 @@ For manual recovery instructions without Ansible, snapshot restoration, or LUKS 
 | :--- | :--- | :--- |
 | **`apt`** | Ensures `sudo` and package tools are installed; upgrades system package cache; configures automatic security updates (`unattended-upgrades`). | `apt` cache, `/etc/apt/apt.conf.d/20auto-upgrades` |
 | **`base`** | Installs common utilities (`curl`, `rsync`, `tree`, `wget`, etc.), sets `/etc/hostname`, and installs customized `.bashrc`. | `/etc/hostname`, `~/.bashrc`, `/root/.bashrc` |
-| **`crypto`** | Manages the full encrypted storage stack across 0, 1, or N volumes (`crypto_disks`) with single or multi-device Btrfs native RAID1: per-device LUKS format/open via memory/stdin, automated LUKS header backups (`/var/backups/luks/`), kernel device scanning (`btrfs device scan`), direct Btrfs formatting with semantic labels and automatic RAID1 mirroring, declarative subvolumes (`sync`, `snapshots`) with zstd compression and label-based fstab integration (`LABEL=<name>`), and monthly Btrfs scrub cron. | `/dev/mapper/<name>-<idx>`, `/var/backups/luks/`, `/etc/fstab` |
+| **`crypto`** | Manages the full encrypted storage stack across 0, 1, or N volumes (`crypto_disks`) with single or multi-device Btrfs native RAID1: per-device LUKS format/open via memory/stdin, automated LUKS header backups (`/var/backups/luks/`), kernel device scanning (`btrfs device scan`), direct Btrfs formatting with semantic labels and automatic RAID1 mirroring, declarative absolute subvolume mounts with flattened internal subvolume names and zstd compression, label-based fstab integration (`LABEL=<name>`), and monthly Btrfs scrub cron. | `/dev/mapper/<name>-<idx>`, `/var/backups/luks/`, `/etc/fstab` |
 | **`htop`** | Installs `htop` and user configuration. | `~/.config/htop/htoprc` |
 | **`iptables`** | Sets up packet filtering firewall rules and restore handler. | `/etc/network/iptables.up.rules` |
 | **`locales`** | Configures system locales (`en_US.UTF-8`, `fr_FR.UTF-8`). | `/etc/default/locale`, `/etc/locale.gen` |
 | **`ntp`** | Sets timezone (`Europe/Paris`) and configures time synchronization (`chrony` on Debian 12+, `ntp` on Debian <= 11). | `tzdata`, `chrony`/`ntp` service |
-| **`rclone`** | Installs `rclone`, sets up sync wrapper script (`rclone.sh` with 30-day log rotation), and configures staggered cron jobs for scheduled cloud backups. | `rclone.sh`, user crontab |
-| **`snapshot`** | Manages Btrfs snapshot automation: installs reusable CLI script (`{{ crypto_base_dir }}/bin/snapshot.sh`), and configures declarative crontabs (`snapshot_jobs`) with parallel execution safety (per-destination lockfiles) and configurable retention (30 daily + 52 weekly). | `{{ crypto_base_dir }}/bin/snapshot.sh`, user crontab |
+| **`rclone`** | Installs `rclone`, sets up sync wrapper script (`/home/{{ ansible_user }}/bin/rclone.sh` with 30-day log rotation in `/home/{{ ansible_user }}/logs`), and configures staggered cron jobs for scheduled cloud backups. | `/home/{{ ansible_user }}/bin/rclone.sh`, user crontab |
+| **`snapshot`** | Manages Btrfs snapshot automation: installs reusable CLI script (`/home/{{ ansible_user }}/bin/snapshot.sh`), and configures declarative crontabs (`snapshot_jobs`) with parallel execution safety (per-destination lockfiles) and configurable retention (30 daily + 52 weekly). | `/home/{{ ansible_user }}/bin/snapshot.sh`, user crontab |
 | **`sshd`** | Hardens SSH configuration (disables root login, disables password authentication) and manages `authorized_keys`. | `/etc/ssh/sshd_config`, `~/.ssh/authorized_keys` |
 | **`sudo`** | Creates `wheel` group, configures `/etc/sudoers.d/99-ansible-wheel` (validated via `visudo`), and configures user `{{ ansible_user }}` with wheel group membership and bash shell without managing local passwords. | `/etc/sudoers.d/99-ansible-wheel`, `/etc/passwd` |
 | **`vim`** | Installs `vim` and provisions `.vimrc` for regular user and root. | `~/.vimrc`, `/root/.vimrc` |

@@ -4,22 +4,28 @@ crypto_disks:
     devices:
       - /dev/disk/by-id/ata-debian-1_SSD_GQ84JJWKHCDM5B354NNT
       - /dev/disk/by-id/ata-debian-2_SSD_08X5T79BNBFM36W6GT86
+    subvolumes:
+      - "/home/{{ ansible_user }}/data/sync"
+      - "/home/{{ ansible_user }}/data/snapshots"
   - name: backup
     devices:
       - /dev/disk/by-id/ata-debian-3_SSD_5E6AYTKT29XMK1XHWJ78
       - /dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK
     subvolumes:
-      - name: sync
+      - "/home/{{ ansible_user }}/backup/sync"
 
 snapshot_jobs:
   - name: data
-    source: "{{ crypto_base_dir }}/data/sync"
-    destination: "{{ crypto_base_dir }}/data/snapshots"
+    source: "/home/{{ ansible_user }}/data/sync"
+    destination: "/home/{{ ansible_user }}/data/snapshots"
 
 rclone_jobs:
   - provider: onedrive
     bucket: ""
+    destination: "/home/{{ ansible_user }}/data/sync"
   - provider: S3
     bucket: www.albatross-networks.com
+    destination: "/home/{{ ansible_user }}/data/sync"
   - provider: S3
     bucket: delarche-images
+    destination: "/home/{{ ansible_user }}/data/sync"

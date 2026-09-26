@@ -30,11 +30,16 @@
   ansible.builtin.copy:
     src: "bashrc.root"
     dest: "/root/.bashrc"
+    owner: root
+    group: root
     mode: "0644"
 
 - name: Setup .bashrc for user
   when: ansible_distribution in ['Debian', 'Ubuntu']
+  become: true
   ansible.builtin.copy:
     src: "bashrc"
-    dest: "~/.bashrc"
+    dest: "/home/{{ ansible_user }}/.bashrc"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
     mode: "0644"

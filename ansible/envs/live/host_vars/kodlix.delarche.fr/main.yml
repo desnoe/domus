@@ -3,16 +3,22 @@ crypto_disks:
   - name: data
     devices:
       - /dev/sda
+    subvolumes:
+      - "/home/{{ ansible_user }}/data/sync"
+      - "/home/{{ ansible_user }}/data/snapshots"
 
 snapshot_jobs:
   - name: data
-    source: "{{ crypto_base_dir }}/data/sync"
-    destination: "{{ crypto_base_dir }}/data/snapshots"
+    source: "/home/{{ ansible_user }}/data/sync"
+    destination: "/home/{{ ansible_user }}/data/snapshots"
 
 rclone_jobs:
   - provider: onedrive
     bucket: ""
+    destination: "/home/{{ ansible_user }}/data/sync"
   - provider: S3
     bucket: www.albatross-networks.com
+    destination: "/home/{{ ansible_user }}/data/sync"
   - provider: S3
     bucket: delarche-images
+    destination: "/home/{{ ansible_user }}/data/sync"

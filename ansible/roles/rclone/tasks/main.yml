@@ -9,7 +9,7 @@
 - name: Ensure bin and logs directories exist
   become: true
   ansible.builtin.file:
-    path: "{{ crypto_base_dir }}/{{ item }}"
+    path: "/home/{{ ansible_user }}/{{ item }}"
     state: directory
     mode: "0755"
     owner: "{{ ansible_user }}"
@@ -22,7 +22,7 @@
   when: ansible_distribution in ['Debian', 'Ubuntu']
   ansible.builtin.copy:
     src: "rclone.sh"
-    dest: "{{ crypto_base_dir }}/bin/rclone.sh"
+    dest: "/home/{{ ansible_user }}/bin/rclone.sh"
     mode: "0755"
 
 - name: Install rclone script in crontab
@@ -31,7 +31,7 @@
     user: "{{ ansible_user }}"
     hour: "{{ item.hour | default(4 + ((idx * 15) // 60)) | string }}"
     minute: "{{ item.minute | default((idx * 15) % 60) | string }}"
-    job: "{{ crypto_base_dir }}/bin/rclone.sh {{ item.provider }} {{ item.bucket }}"
-  loop: "{{ rclone_jobs | default('[]') }}"
+    job: "/home/{{ ansible_user }}/bin/rclone.sh {{ item.provider }} {{ item.destination }} {{ item.bucket }}"
+  loop: "{{ rclone_jobs | default([]) }}"
   loop_control:
     index_var: idx

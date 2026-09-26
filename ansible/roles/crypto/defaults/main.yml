@@ -1,24 +1,20 @@
 ---
 wipe: false
-crypto_base_dir: "/home/{{ ansible_user }}"
 
 btrfs_default_mount_options: "nofail,compress=zstd:3,noatime,user_subvol_rm_allowed"
-
-# Default subvolumes created and mounted inside each disk directory:
-# {{ crypto_base_dir }}/<disk_name>/<subvolume_name>
-btrfs_default_subvolumes:
-  - name: sync
-  - name: snapshots
 
 # Declarative list of encrypted block devices or RAID pools to manage on the host.
 # Supports 0 disks (empty list), 1 disk, or multiple disks.
 # For 1 device: formats standard Btrfs filesystem.
 # For 2+ devices: formats native Btrfs RAID1 (-d raid1 -m raid1).
+# Each subvolume is defined as an absolute mount path; its internal Btrfs subvolume
+# name is derived by flattening slashes into underscores (e.g. /data/sync -> data_sync).
 # Example:
 # crypto_disks:
 #   - name: data
 #     devices:
 #       - /dev/disk/by-id/ata-debian-1_SSD_...
-#     # mount_point: defaults to "{{ crypto_base_dir }}/{{ name }}"
-#     # subvolumes: defaults to btrfs_default_subvolumes
+#     subvolumes:
+#       - /home/{{ ansible_user }}/data/sync
+#       - /home/{{ ansible_user }}/data/snapshots
 crypto_disks: []

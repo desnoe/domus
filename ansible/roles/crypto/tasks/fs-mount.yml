@@ -1,22 +1,4 @@
 ---
-- name: Ensure crypto base directory exists
-  become: true
-  ansible.builtin.file:
-    path: "{{ crypto_base_dir }}"
-    state: directory
-    mode: "0755"
-    owner: "{{ ansible_user }}"
-    group: "{{ ansible_user }}"
-
-- name: "Ensure disk base directory exists: {{ disk_base_mount }}"
-  become: true
-  ansible.builtin.file:
-    path: "{{ disk_base_mount }}"
-    state: directory
-    mode: "0755"
-    owner: "{{ ansible_user }}"
-    group: "{{ ansible_user }}"
-
 - name: "Ensure Btrfs subvolumes exist: {{ disk_name }}"
   become: true
   ansible.builtin.shell:
@@ -27,8 +9,9 @@
       mount -o noatime,subvolid=5 LABEL={{ disk_name }} "$tmpdir"
       created=0
       {% for subvol in disk_subvolumes %}
-      if ! btrfs subvolume show "$tmpdir/{{ subvol.name }}" >/dev/null 2>&1; then
-        btrfs subvolume create "$tmpdir/{{ subvol.name }}"
+      {% set subvol_name = subvol | regex_replace('^/+', '') | regex_replace('/+$', '') | replace('/', '_') %}
+      if ! btrfs subvolume show "$tmpdir/{{ subvol_name }}" >/dev/null 2>&1; then
+        btrfs subvolume create "$tmpdir/{{ subvol_name }}"
         created=1
       fi
       {% endfor %}
@@ -40,20 +23,20 @@
 - name: "Ensure subvolume mount directories exist: {{ disk_name }}"
   become: true
   ansible.builtin.file:
-    path: "{{ item.mount_point | default(disk_base_mount + '/' + item.name) }}"
+    path: "{{ item }}"
     state: directory
-    mode: "{{ item.mode | default('0755') }}"
-    owner: "{{ item.owner | default(ansible_user) }}"
-    group: "{{ item.group | default(ansible_user) }}"
+    mode: "0755"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
   loop: "{{ disk_subvolumes }}"
 
 - name: "Mount Btrfs subvolumes in fstab: {{ disk_name }}"
   become: true
   ansible.posix.mount:
-    path: "{{ item.mount_point | default(disk_base_mount + '/' + item.name) }}"
+    path: "{{ item }}"
     src: "LABEL={{ disk_name }}"
     fstype: btrfs
-    opts: "{{ item.opts | default(btrfs_default_mount_options + ',subvol=' + item.name) }}"
+    opts: "{{ btrfs_default_mount_options }},subvol={{ item | regex_replace('^/+', '') | regex_replace('/+$', '') | replace('/', '_') }}"
     boot: false
     state: mounted
   loop: "{{ disk_subvolumes }}"
@@ -61,11 +44,11 @@
 - name: "Ensure subvolume permissions after mounting: {{ disk_name }}"
   become: true
   ansible.builtin.file:
-    path: "{{ item.mount_point | default(disk_base_mount + '/' + item.name) }}"
+    path: "{{ item }}"
     state: directory
-    mode: "{{ item.mode | default('0755') }}"
-    owner: "{{ item.owner | default(ansible_user) }}"
-    group: "{{ item.group | default(ansible_user) }}"
+    mode: "0755"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
   loop: "{{ disk_subvolumes }}"
 
 - name: "Configure monthly Btrfs scrub cron job: {{ disk_name }}"
@@ -74,4 +57,4 @@
     name: "btrfs scrub {{ disk_name }}"
     user: "root"
     special_time: "monthly"
-    job: "/usr/bin/btrfs scrub start -B {{ disk_subvolumes[0].mount_point | default(disk_base_mount + '/' + disk_subvolumes[0].name) }} >/dev/null 2>&1"
+    job: "/usr/bin/btrfs scrub start -B {{ disk_subvolumes[0] }} >/dev/null 2>&1"
