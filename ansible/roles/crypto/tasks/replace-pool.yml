@@ -1,0 +1,248 @@
+---
+- name: "Set facts for replacement in pool: {{ current_disk.name }}"
+  ansible.builtin.set_fact:
+    crypto_pool_name: "{{ current_disk.name }}"
+    crypto_pool_devices: "{{ current_disk.devices }}"
+    crypto_disk_name: "{{ current_disk.name }}"
+    crypto_disk_devices: "{{ current_disk.devices }}"
+    crypto_disk_passphrase: "{{ current_disk.passphrase | default(luks_pass) }}"
+    crypto_pool_subvolumes: "{{ current_disk.subvolumes }}"
+    crypto_disk_subvolumes: "{{ current_disk.subvolumes }}"
+    crypto_pool_mount: "{{ current_disk.subvolumes[0] }}"
+    crypto_pool_first_subvol: "{{ current_disk.subvolumes[0] | regex_replace('^/+', '') | regex_replace('/+$', '') | replace('/', '_') }}"
+
+- name: "Check LUKS status for pool members: {{ crypto_pool_name }}"
+  ansible.builtin.command:
+    cmd: "cryptsetup status {{ crypto_pool_name }}-{{ idx }}"
+  loop: "{{ crypto_pool_devices }}"
+  loop_control:
+    index_var: idx
+  register: crypto_mapper_status_cmds
+  changed_when: false
+  failed_when: false
+
+- name: "Check if physical devices are formatted as LUKS: {{ crypto_pool_name }}"
+  ansible.builtin.command:
+    cmd: "cryptsetup isLuks {{ item }}"
+  loop: "{{ crypto_pool_devices }}"
+  loop_control:
+    index_var: idx
+  register: crypto_isluks_status_cmds
+  changed_when: false
+  failed_when: false
+
+- name: "Identify candidate replacement device for pool: {{ crypto_pool_name }}"
+  ansible.builtin.set_fact:
+    crypto_candidate_idx: >-
+      {{
+        replace_index | default(
+          ((crypto_isluks_status_cmds.results | selectattr('rc', 'ne', 0) | map(attribute='idx') | list | length) > 0)
+          | ternary(
+              (crypto_isluks_status_cmds.results | selectattr('rc', 'ne', 0) | map(attribute='idx') | list | first),
+              ((crypto_mapper_status_cmds.results | selectattr('rc', 'ne', 0) | map(attribute='idx') | list | first) | default(-1))
+            )
+        ) | int
+      }}
+
+- name: "Validate explicit replace_index bounds for pool: {{ crypto_pool_name }}"
+  when:
+    - replace_index is defined
+    - crypto_candidate_idx | int < 0 or crypto_candidate_idx | int >= (crypto_pool_devices | length)
+  ansible.builtin.fail:
+    msg: "Invalid replace_index={{ replace_index }} for pool '{{ crypto_pool_name }}' (valid indices: 0..{{ (crypto_pool_devices | length) - 1 }})."
+
+- name: "Execute disk replacement for pool: {{ crypto_pool_name }}"
+  when:
+    - crypto_candidate_idx | int >= 0
+    - crypto_candidate_idx | int < (crypto_pool_devices | length)
+  block:
+    - name: "Set resolved replacement facts: {{ crypto_pool_name }}"
+      ansible.builtin.set_fact:
+        crypto_candidate_dev: "{{ crypto_pool_devices[crypto_candidate_idx | int] }}"
+        crypto_candidate_mapper: "/dev/mapper/{{ crypto_pool_name }}-{{ crypto_candidate_idx }}"
+        crypto_replaced_pools_count: "{{ (crypto_replaced_pools_count | int) + 1 }}"
+
+    - name: "Display replacement target confirmation details: {{ crypto_pool_name }}"
+      ansible.builtin.debug:
+        msg: |
+          =======================================================
+          BTRFS RAID1 DISK REPLACEMENT CANDIDATE DETECTED
+          =======================================================
+          Host: {{ inventory_hostname }}
+          Pool: {{ crypto_pool_name }}
+          Member Index: {{ crypto_candidate_idx }}
+          New Physical Device: {{ crypto_candidate_dev }}
+          Target Mapper Device: {{ crypto_candidate_mapper }}
+          Btrfs Mount Point: {{ crypto_pool_mount }}
+          =======================================================
+
+    - name: "Confirm disk replacement"
+      ansible.builtin.pause:
+        prompt: >-
+          WARNING: Device {{ crypto_candidate_dev }} will be formatted with LUKS
+          and integrated into Btrfs pool '{{ crypto_pool_name }}'. Type 'REPLACE' to proceed
+      register: crypto_replace_confirm
+      when: not (confirm_replace | default(false) | bool)
+
+    - name: "Verify replace confirmation input"
+      when:
+        - not (confirm_replace | default(false) | bool)
+        - (crypto_replace_confirm.user_input | default('')) != 'REPLACE'
+      ansible.builtin.fail:
+        msg: "Aborting: Disk replacement confirmation not given ('REPLACE' required)."
+
+    - name: "Ensure surviving pool member containers are open: {{ crypto_pool_name }}"
+      ansible.builtin.include_tasks: disk-decrypt.yml
+      loop: "{{ crypto_pool_devices }}"
+      loop_control:
+        loop_var: dev_item
+        index_var: dev_idx
+      when: dev_idx != (crypto_candidate_idx | int)
+
+    - name: "Unmount Btrfs subvolumes before closing candidate mapper: {{ crypto_pool_name }}"
+      when: crypto_mapper_status_cmds.results[crypto_candidate_idx | int].rc == 0
+      become: true
+      ansible.posix.mount:
+        path: "{{ item }}"
+        state: unmounted
+      loop: "{{ crypto_pool_subvolumes }}"
+
+    - name: "Unregister candidate mapper from Btrfs device cache: {{ crypto_candidate_mapper }}"
+      when: crypto_mapper_status_cmds.results[crypto_candidate_idx | int].rc == 0
+      become: true
+      ansible.builtin.command:
+        cmd: "btrfs device scan --forget {{ crypto_candidate_mapper }}"
+      changed_when: false
+      failed_when: false
+
+    - name: "Close candidate mapper container: {{ crypto_candidate_mapper }}"
+      when: crypto_mapper_status_cmds.results[crypto_candidate_idx | int].rc == 0
+      become: true
+      ansible.builtin.command:
+        cmd: "cryptsetup close {{ crypto_pool_name }}-{{ crypto_candidate_idx }}"
+      changed_when: true
+
+    - name: "Remove existing LUKS header backup file if present: {{ crypto_candidate_mapper }}"
+      become: true
+      ansible.builtin.file:
+        path: "/var/backups/luks/luks-header-{{ crypto_pool_name }}-{{ crypto_candidate_idx }}.img"
+        state: absent
+
+    - name: "Format candidate device with LUKS: {{ crypto_candidate_dev }}"
+      become: true
+      no_log: true
+      ansible.builtin.command:
+        cmd: "cryptsetup luksFormat --batch-mode --type luks2 --cipher aes-xts-plain64 --key-size 512 --hash sha512 {{ crypto_candidate_dev }}"
+        stdin: "{{ crypto_disk_passphrase }}"
+      changed_when: true
+
+    - name: "Open LUKS container for replacement device: {{ crypto_candidate_mapper }}"
+      become: true
+      no_log: true
+      ansible.builtin.command:
+        cmd: "cryptsetup open {{ crypto_candidate_dev }} {{ crypto_pool_name }}-{{ crypto_candidate_idx }}"
+        stdin: "{{ crypto_disk_passphrase }}"
+      changed_when: true
+
+    - name: "Wipe stale filesystem signatures on new decrypted container: {{ crypto_candidate_mapper }}"
+      become: true
+      ansible.builtin.command:
+        cmd: "wipefs -a {{ crypto_candidate_mapper }}"
+      changed_when: true
+
+    - name: "Backup LUKS header for replacement device: {{ crypto_candidate_dev }}"
+      become: true
+      ansible.builtin.command:
+        cmd: >-
+          cryptsetup luksHeaderBackup {{ crypto_candidate_dev }}
+          --header-backup-file /var/backups/luks/luks-header-{{ crypto_pool_name }}-{{ crypto_candidate_idx }}.img
+      changed_when: true
+
+    - name: "Ensure strict permissions on LUKS header backup file: {{ crypto_pool_name ~ '-' ~ crypto_candidate_idx }}"
+      become: true
+      ansible.builtin.file:
+        path: "/var/backups/luks/luks-header-{{ crypto_pool_name }}-{{ crypto_candidate_idx }}.img"
+        owner: root
+        group: root
+        mode: "0400"
+
+    - name: "Scan for multi-device Btrfs pools: {{ crypto_pool_name }}"
+      become: true
+      ansible.builtin.command:
+        cmd: "btrfs device scan"
+      changed_when: false
+
+    - name: "Check if Btrfs filesystem is currently mounted: {{ crypto_pool_mount }}"
+      ansible.builtin.command:
+        cmd: "findmnt -M {{ crypto_pool_mount }}"
+      register: crypto_findmnt_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: "Mount degraded Btrfs filesystem if unmounted: {{ crypto_pool_mount }}"
+      when: crypto_findmnt_cmd.rc != 0
+      become: true
+      ansible.posix.mount:
+        path: "{{ crypto_pool_mount }}"
+        src: "LABEL={{ crypto_pool_name }}"
+        fstype: btrfs
+        opts: "degraded,subvol={{ crypto_pool_first_subvol }}"
+        state: ephemeral
+
+    - name: "Inspect Btrfs filesystem members: {{ crypto_pool_mount }}"
+      become: true
+      ansible.builtin.command:
+        cmd: "btrfs filesystem show {{ crypto_pool_mount }}"
+      register: crypto_btrfs_show_cmd
+      changed_when: false
+
+    - name: "Determine Btrfs replace source device"
+      ansible.builtin.set_fact:
+        crypto_replace_source_dev: "{{ replace_source | default((crypto_candidate_idx | int + 1) | string) }}"
+
+    - name: "Initiate Btrfs device replacement: {{ crypto_replace_source_dev ~ ' -> ' ~ crypto_candidate_mapper }}"
+      become: true
+      ansible.builtin.command:
+        cmd: "btrfs replace start -f -B {{ crypto_replace_source_dev }} {{ crypto_candidate_mapper }} {{ crypto_pool_mount }}"
+      changed_when: true
+
+    - name: "Query Btrfs replace status: {{ crypto_pool_mount }}"
+      become: true
+      ansible.builtin.command:
+        cmd: "btrfs replace status {{ crypto_pool_mount }}"
+      register: crypto_replace_status_cmd
+      changed_when: false
+
+    - name: "Unmount temporary degraded Btrfs mount before standard remount: {{ crypto_pool_mount }}"
+      when: crypto_findmnt_cmd.rc != 0
+      become: true
+      ansible.posix.mount:
+        path: "{{ crypto_pool_mount }}"
+        state: unmounted
+
+    - name: "Display Btrfs Replace Execution Result"
+      ansible.builtin.debug:
+        msg: |
+          =======================================================
+          BTRFS REPLACEMENT COMPLETED: {{ crypto_pool_name }}
+          =======================================================
+          Source Devid: {{ crypto_replace_source_dev }}
+          Target Device: {{ crypto_candidate_mapper }} ({{ crypto_candidate_dev }})
+          Mount: {{ crypto_pool_mount }}
+          Status:
+          {{ crypto_replace_status_cmd.stdout }}
+          =======================================================
+
+    - name: "Ensure all Btrfs subvolumes are fully mounted: {{ crypto_pool_name }}"
+      ansible.builtin.include_tasks: fs-mount.yml
+
+    - name: "Reclaim empty chunks and convert any single-profile chunks back to RAID1: {{ crypto_pool_mount }}"
+      when: (crypto_pool_devices | length) > 1
+      become: true
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -euo pipefail
+          btrfs balance start -dusage=0 -musage=0 {{ crypto_pool_mount }}
+          btrfs balance start -f -dconvert=raid1,soft -mconvert=raid1,soft -sconvert=raid1,soft {{ crypto_pool_mount }}
+      changed_when: true

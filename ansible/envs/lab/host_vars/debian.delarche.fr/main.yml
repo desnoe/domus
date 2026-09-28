@@ -1,10 +1,31 @@
-luks_dev: /dev/sdb
-luks_name: crypt_sdb
+---
+crypto_disks:
+  - name: data
+    devices:
+      - /dev/disk/by-id/ata-debian-1_SSD_GQ84JJWKHCDM5B354NNT
+      - /dev/disk/by-id/ata-debian-2_SSD_08X5T79BNBFM36W6GT86
+    subvolumes:
+      - "/home/{{ ansible_user }}/data/sync"
+      - "/home/{{ ansible_user }}/data/snapshots"
+  - name: backup
+    devices:
+      - /dev/disk/by-id/ata-debian-3_SSD_5E6AYTKT29XMK1XHWJ78
+      - /dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK
+    subvolumes:
+      - "/home/{{ ansible_user }}/backup"
+
+snapshot_jobs:
+  - name: data
+    source: "/home/{{ ansible_user }}/data/sync"
+    destination: "/home/{{ ansible_user }}/data/snapshots"
 
 rclone_jobs:
-  - provider: onedrive
-    bucket: ""
+  - provider: OneDrive
+    bucket: Share/50ans
+    destination: "/home/{{ ansible_user }}/data/sync"
   - provider: S3
     bucket: www.albatross-networks.com
+    destination: "/home/{{ ansible_user }}/data/sync"
   - provider: S3
     bucket: delarche-images
+    destination: "/home/{{ ansible_user }}/data/sync"

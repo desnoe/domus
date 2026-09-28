@@ -1,7 +1,0 @@
----
-
-- hosts: crypto
-  vars:
-    wipe: yes
-  roles:
-    - crypto

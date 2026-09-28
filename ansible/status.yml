@@ -1,0 +1,126 @@
+---
+- name: Report system baseline and security status
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Report base system status
+      ansible.builtin.include_role:
+        name: base
+        tasks_from: status
+        apply:
+          tags:
+            - base
+            - status
+      tags:
+        - base
+        - status
+
+    - name: Report locales and keyboard status
+      ansible.builtin.include_role:
+        name: locales
+        tasks_from: status
+        apply:
+          tags:
+            - locales
+            - status
+      tags:
+        - locales
+        - status
+
+    - name: Report time and NTP status
+      ansible.builtin.include_role:
+        name: ntp
+        tasks_from: status
+        apply:
+          tags:
+            - ntp
+            - status
+      tags:
+        - ntp
+        - status
+
+    - name: Report SSH daemon and keys status
+      ansible.builtin.include_role:
+        name: sshd
+        tasks_from: status
+        apply:
+          tags:
+            - sshd
+            - status
+      tags:
+        - sshd
+        - status
+
+    - name: Report UFW firewall status
+      ansible.builtin.include_role:
+        name: ufw
+        tasks_from: status
+        apply:
+          tags:
+            - ufw
+            - status
+      tags:
+        - ufw
+        - status
+
+- name: Report storage and backup status
+  hosts: crypto
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Report storage pool status
+      ansible.builtin.include_role:
+        name: crypto
+        tasks_from: status
+        apply:
+          tags:
+            - crypto
+            - status
+      tags:
+        - crypto
+        - status
+
+    - name: Report Btrfs snapshots status
+      ansible.builtin.include_role:
+        name: snapshot
+        tasks_from: status
+        apply:
+          tags:
+            - snapshot
+            - status
+      tags:
+        - snapshot
+        - status
+
+    - name: Report cloud backup logs status
+      ansible.builtin.include_role:
+        name: rclone
+        tasks_from: status
+        apply:
+          tags:
+            - rclone
+            - status
+      tags:
+        - rclone
+        - status
+
+- name: Report GitHub Actions runner status
+  hosts: runner
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Report GitHub Actions self-hosted runner status
+      ansible.builtin.include_role:
+        name: runner
+        tasks_from: status
+        apply:
+          tags:
+            - runner
+            - status
+      tags:
+        - runner
+        - status

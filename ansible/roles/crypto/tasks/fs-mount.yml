@@ -1,117 +1,61 @@
 ---
+- name: "Ensure Btrfs subvolumes exist: {{ crypto_disk_name }}"
+  become: true
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -euo pipefail
+      tmpdir=$(mktemp -d)
+      trap 'umount "$tmpdir" 2>/dev/null || true; rmdir "$tmpdir" 2>/dev/null || true' EXIT
+      mount -o noatime,subvolid=5 LABEL={{ crypto_disk_name }} "$tmpdir"
+      created=0
+      {% for subvol in crypto_disk_subvolumes %}
+      {% set subvol_name = subvol | regex_replace('^/+', '') | regex_replace('/+$', '') | replace('/', '_') %}
+      if ! btrfs subvolume show "$tmpdir/{{ subvol_name }}" >/dev/null 2>&1; then
+        btrfs subvolume create "$tmpdir/{{ subvol_name }}"
+        created=1
+      fi
+      {% endfor %}
+      exit $((created == 1 ? 100 : 0))
+  register: crypto_btrfs_subvol_create
+  changed_when: crypto_btrfs_subvol_create.rc == 100
+  failed_when: crypto_btrfs_subvol_create.rc not in [0, 100]
 
-- name: "check crypto base dir"
+- name: "Ensure subvolume mount directories exist: {{ crypto_disk_name }}"
   become: true
   ansible.builtin.file:
-    path: "{{ crypto_base_dir }}"
+    path: "{{ item }}"
     state: directory
-    mode: 0755
-    owner: olivier
-    group: olivier
+    mode: "0755"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+  loop: "{{ crypto_disk_subvolumes }}"
 
-- name: create temporary directory
-  ansible.builtin.tempfile:
-    state: directory
-  register: tmpdir
-  changed_when: false
-
-- name: check if fake fstab exists or not
-  ansible.builtin.stat:
-    path: "{{ crypto_base_dir }}/.fakefstab"
-  register: fakefstab
-
-- name: create fake fstab
-  become: true
-  ansible.builtin.file:
-    state: touch
-    path: "{{ crypto_base_dir }}/.fakefstab"
-  when: not fakefstab.stat.exists
-
-- name: mount up the btrfs filesystem temporarily
+- name: "Mount Btrfs subvolumes in fstab: {{ crypto_disk_name }}"
   become: true
   ansible.posix.mount:
-    name: "{{ tmpdir.path }}"
-    src: /dev/vg_data/lv_data
+    path: "{{ item }}"
+    src: "LABEL={{ crypto_disk_name }}"
     fstype: btrfs
-    fstab: "{{ crypto_base_dir }}/.fakefstab"
+    opts: "{{ crypto_btrfs_default_mount_options }},subvol={{ item | regex_replace('^/+', '') | regex_replace('/+$', '') | replace('/', '_') }}"
+    boot: false
     state: mounted
-  changed_when: false
+  loop: "{{ crypto_disk_subvolumes }}"
 
-- name: get btrfs subvolume list
-  become: true
-  command: btrfs subvolume list "{{ tmpdir.path }}"
-  register: btrfs_subvolumelist
-  changed_when: false
-
-- name: get btrfs subvolume IDs
-  set_fact:
-    btrfs_subvolumeid_sync: "{{ btrfs_subvolumelist.stdout | regex_search('ID (\\d+) .* sync$', '\\1', multiline=True) | first }}"
-    btrfs_subvolumeid_snapshots: "{{ btrfs_subvolumelist.stdout | regex_search('ID (\\d+) .* snapshots$', '\\1', multiline=True) | first }}"
-  changed_when: false
-
-- name: unmount the btrfs filesystem
-  become: true
-  ansible.posix.mount:
-    name: "{{ tmpdir.path }}"
-    state: unmounted
-  changed_when: false
-
-- name: remove temporary directory
-  ansible.builtin.file:
-    path: "{{ tmpdir.path }}"
-    state: absent
-  changed_when: false
-
-- name: "mount sync dir"
-  become: true
-  ansible.posix.mount:
-    name: "{{ crypto_base_dir }}/sync/"
-    src: /dev/vg_data/lv_data
-    fstype: btrfs
-    fstab: "{{ crypto_base_dir }}/.fakefstab"
-    opts: "noauto,subvolid={{ btrfs_subvolumeid_sync }}"
-    state: mounted
-
-- name: "check sync base dir"
+- name: "Ensure subvolume permissions after mounting: {{ crypto_disk_name }}"
   become: true
   ansible.builtin.file:
-    path: "{{ crypto_base_dir }}/sync"
+    path: "{{ item }}"
     state: directory
-    mode: 0755
-    owner: olivier
-    group: olivier
+    mode: "0755"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+  loop: "{{ crypto_disk_subvolumes }}"
 
-- name: "mount snapshots dir"
+- name: "Configure monthly Btrfs scrub cron job: {{ crypto_disk_name }}"
   become: true
-  ansible.posix.mount:
-    name: "{{ crypto_base_dir }}/snapshots/"
-    src: /dev/vg_data/lv_data
-    fstype: btrfs
-    fstab: "{{ crypto_base_dir }}/.fakefstab"
-    opts: "noauto,subvolid={{ btrfs_subvolumeid_snapshots }}"
-    state: mounted
-
-- name: "check snapshots base dir"
-  become: true
-  ansible.builtin.file:
-    path: "{{ crypto_base_dir }}/snapshots"
-    state: directory
-    mode: 0755
-    owner: olivier
-    group: olivier
-
-- name: "copy snapshot script"
-  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
-  copy:
-    src: "snapshot.sh"
-    dest: "{{ crypto_base_dir }}/"
-    mode: 0755
-
-- name: "install snapshot script in crontab"
   ansible.builtin.cron:
-    name: "snapshot data"
-    user: "olivier"
-    hour: "5"
-    minute: "0"
-    job: "{{ crypto_base_dir }}/snapshot.sh"
-
+    name: "btrfs scrub {{ crypto_disk_name }}"
+    user: "root"
+    special_time: "monthly"
+    job: "/usr/bin/btrfs scrub start -B {{ crypto_disk_subvolumes[0] }} >/dev/null 2>&1"

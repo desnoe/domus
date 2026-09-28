@@ -1,0 +1,32 @@
+---
+extends: default
+
+rules:
+  document-start: disable
+  line-length:
+    max: 160
+    level: error
+  truthy:
+    level: error
+    check-keys: false
+  comments:
+    level: error
+    min-spaces-from-content: 1
+  comments-indentation: disable
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
+  braces:
+    max-spaces-inside: 1
+    level: error
+  brackets:
+    max-spaces-inside: 1
+    level: error
+  indentation:
+    spaces: consistent
+    indent-sequences: consistent
+
+ignore: |
+  .venv/
+  .ansible/
+  ansible/collections/

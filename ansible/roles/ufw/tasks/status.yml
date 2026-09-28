@@ -1,0 +1,17 @@
+---
+- name: Query UFW firewall status
+  become: true
+  ansible.builtin.command:
+    cmd: ufw status verbose
+  register: ufw_status_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Display UFW Firewall Status Summary
+  ansible.builtin.debug:
+    msg: |-
+      =======================================================
+      UFW FIREWALL STATUS REPORT: {{ inventory_hostname }}
+      =======================================================
+      {{ ufw_status_cmd.stdout | default('UFW not installed or inactive.', true) }}
+      =======================================================

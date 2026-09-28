@@ -1,30 +1,28 @@
 ---
-
-- name: "make sure we have a 'wheel' group"
+- name: Ensure 'wheel' group exists
   become: true
-  group:
+  ansible.builtin.group:
     name: wheel
     state: present
 
-- name: "allow 'wheel' group to have passwordless sudo"
+- name: Allow 'wheel' group passwordless sudo via drop-in file
   become: true
-  lineinfile:
-    dest: /etc/sudoers
-    state: present
-    regexp: '^%wheel'
-    line: '%wheel ALL=(ALL) NOPASSWD: ALL'
-    # validate: 'visudo -cf %s'
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/99-ansible-wheel
+    content: "%wheel ALL=(ALL) NOPASSWD: ALL\n"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "/usr/sbin/visudo -cf %s"
 
-- name: "add sudoers users to wheel group"
+- name: "Configure wheel group membership for user: {{ ansible_user }}"
   become: true
-  user:
-    name: olivier
-    password: $6$HQ2dhZe65Au8zyYD$ER/4bSIeYvOYBmbofWXIYUTZFJxwujQwZDTbqlYlpGxP4NA1YU71ggy9hlfRakhq/LPJXN4ignBTPzisWEn/L/
-    comment: "Olivier Desnoe"
+
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
     groups:
       - wheel
-    append: yes
+    append: true
     state: present
-    createhome: yes
+    createhome: true
     shell: /bin/bash
-

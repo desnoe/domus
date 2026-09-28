@@ -1,34 +1,14 @@
 ---
-- name: "check if encrypted volume exists or not"
+- name: "Check if encrypted volume exists: {{ crypto_disk_name ~ '-' ~ dev_idx }}"
   ansible.builtin.stat:
-    path: /dev/mapper/{{ luks_name }}
-  register: luks_volume
+    path: "/dev/mapper/{{ crypto_disk_name }}-{{ dev_idx }}"
+  register: crypto_luks_volume
 
-- name: "create temp file"
+- name: "Open LUKS encrypted device: {{ dev_item }}"
   become: true
-  command: mktemp /tmp/encdisk.XXXXXXX
-  register: tmp
-  when: not luks_volume.stat.exists
-
-- name: "write password to temp file"
-  become: true
-  template:
-    src: templates/encrypt-pass.j2
-    dest: "{{ tmp.stdout }}"
-  when: not luks_volume.stat.exists
-
-- name: "open encrypted disk"
-  become: true
-  shell: cat {{ tmp.stdout }} | cryptsetup luksOpen {{ luks_dev }} {{ luks_name }}
-  when: not luks_volume.stat.exists
-
-- name: "purge temp file"
-  become: true
-  command: shred -z -u {{ tmp.stdout }}
-  when: not luks_volume.stat.exists
-
-- name: "activate all known volume groups in the system"
-  become: true
-  command: vgchange -a y
-  when: not luks_volume.stat.exists
-
+  no_log: true
+  ansible.builtin.command:
+    cmd: "cryptsetup luksOpen {{ dev_item }} {{ crypto_disk_name }}-{{ dev_idx }} --key-file -"
+    stdin: "{{ crypto_disk_passphrase }}"
+  when: not crypto_luks_volume.stat.exists
+  changed_when: true

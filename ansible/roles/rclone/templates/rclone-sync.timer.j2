@@ -1,0 +1,14 @@
+# Managed by Ansible - do not edit manually
+{% set rclone_job_slug = ((item.provider ~ ('-' ~ item.bucket if (item.bucket | default('') | length > 0) else '')) | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-+|-+$', '')) %}
+{% set timer_hour = item.hour | default(4 + ((rclone_job_idx * 15) // 60)) | int %}
+{% set timer_minute = item.minute | default((rclone_job_idx * 15) % 60) | int %}
+[Unit]
+Description=Daily timer for Rclone sync ({{ item.provider }}{{ ':' ~ item.bucket if (item.bucket | default('') | length > 0) else ':' }})
+
+[Timer]
+OnCalendar=*-*-* {{ "%02d:%02d:00" | format(timer_hour, timer_minute) }}
+Persistent=true
+Unit=rclone-sync-{{ rclone_job_slug }}.service
+
+[Install]
+WantedBy=timers.target

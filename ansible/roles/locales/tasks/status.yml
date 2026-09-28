@@ -1,0 +1,17 @@
+---
+- name: Query system locale and keyboard status
+  become: true
+  ansible.builtin.command:
+    cmd: localectl status
+  register: locales_status_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Display Locales and Keyboard Status Summary
+  ansible.builtin.debug:
+    msg: |-
+      =======================================================
+      LOCALES & KEYBOARD STATUS REPORT: {{ inventory_hostname }}
+      =======================================================
+      {{ locales_status_cmd.stdout | default('localectl unavailable.', true) }}
+      =======================================================

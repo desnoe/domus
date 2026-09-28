@@ -1,28 +1,15 @@
 ---
-
-- name: "install required packages"
+- name: Install required storage packages
+  when: (crypto_disks | default([])) | length > 0
   become: true
-  apt:
+  ansible.builtin.apt:
     state: present
     name:
       - cryptsetup
-      - lvm2
-      - btrfs-tools
+      - btrfs-progs
 
-- name: "(re-)encrypt block device"
-  when: wipe == True
-  include: disk-encrypt.yml
-
-- name: "decrypt and open encrypted block device"
-  include: disk-decrypt.yml
-
-- name: "(re-)set LVM2 volumes"
-  when: wipe == True
-  include: lvm2-reset.yml
-
-- name: "(re-)set partitions"
-  when: wipe == True
-  include: fs-reset.yml
-
-- name: "mount partitions"
-  include: fs-mount.yml
+- name: Process encrypted disk pipeline
+  ansible.builtin.include_tasks: disk-pipeline.yml
+  loop: "{{ crypto_disks | default([]) }}"
+  loop_control:
+    loop_var: disk

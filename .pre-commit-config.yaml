@@ -1,0 +1,49 @@
+---
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+        args: [--unsafe]
+      - id: check-added-large-files
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      - id: check-symlinks
+      - id: destroyed-symlinks
+      - id: detect-private-key
+
+  - repo: https://github.com/adrienverge/yamllint.git
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        args: [--strict, -c, .yamllint]
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        args: [--severity=style]
+        files: ^(scripts/.*|.*\.sh)$
+
+  - repo: local
+    hooks:
+      - id: check-ansible-vault
+        name: check-ansible-vault
+        entry: >-
+          bash -c 'for f in "$@"; do head -n 1 "$f" | grep -q "^\$ANSIBLE_VAULT;" || { echo "ERROR: Unencrypted vault file: $f"; exit 1; }; done' --
+        language: system
+        files: (^|/)vault\.yml$
+
+      - id: ansible-lint
+        name: ansible-lint
+        entry: env ANSIBLE_HOME=/tmp/.ansible uv run ansible-lint --strict
+        language: system
+        files: ^ansible/.*
+        pass_filenames: false
+        always_run: true

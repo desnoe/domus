@@ -1,22 +1,37 @@
 ---
-
-- name: "install list of base packages"
-  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+- name: Install chrony and timezone packages
+  when: ansible_distribution in ['Debian', 'Ubuntu']
   become: true
-  apt:
-    name: "{{ item }}"
+  ansible.builtin.apt:
     state: present
-  with_items:
-    - tzdata
-    - ntp
+    name:
+      - chrony
+      - tzdata
 
-- name: "set timezone"
+- name: Set timezone to Europe/Paris
   become: true
-  timezone:
+  community.general.timezone:
     name: Europe/Paris
 
-- name: 'ensure NTP is running and enabled'
-  service:
-    name: ntp
+- name: Configure /etc/chrony/chrony.conf
+  become: true
+  ansible.builtin.copy:
+    src: chrony.conf
+    dest: /etc/chrony/chrony.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart chrony
+
+- name: Verify chrony configuration syntax
+  become: true
+  ansible.builtin.command:
+    cmd: /usr/sbin/chronyd -p -f /etc/chrony/chrony.conf
+  changed_when: false
+
+- name: Ensure chrony service is running and enabled
+  become: true
+  ansible.builtin.service:
+    name: chrony
     state: started
     enabled: true

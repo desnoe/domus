@@ -1,16 +1,47 @@
-- name: "install list of base packages"
-  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+---
+- name: Install list of base packages
+  when: ansible_distribution in ['Debian', 'Ubuntu']
   become: true
-  apt:
+  ansible.builtin.apt:
     state: present
     name:
       - sudo
       - aptitude
 
-- name: "update repositories cache and upgrade"
-  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+- name: Update repositories cache and upgrade packages
+  when: ansible_distribution in ['Debian', 'Ubuntu']
   become: true
-  apt:
-    upgrade: 'yes'
-    update_cache: 'yes'
+  ansible.builtin.apt:
+    upgrade: true
+    update_cache: true
     cache_valid_time: 3600
+
+- name: Install unattended-upgrades packages
+  when: ansible_distribution in ['Debian', 'Ubuntu']
+  become: true
+  ansible.builtin.apt:
+    state: present
+    name:
+      - unattended-upgrades
+      - apt-listchanges
+
+- name: Configure periodic auto-upgrades
+  when: ansible_distribution in ['Debian', 'Ubuntu']
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+
+- name: Ensure unattended-upgrades service is enabled and started
+  when: ansible_distribution in ['Debian', 'Ubuntu']
+  become: true
+  ansible.builtin.service:
+    name: unattended-upgrades
+    state: started
+    enabled: true

@@ -1,0 +1,6 @@
+---
+- name: Decrypt and mount encrypted storage
+  hosts: crypto
+  become: true
+  roles:
+    - crypto

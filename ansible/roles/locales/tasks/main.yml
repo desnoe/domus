@@ -1,36 +1,46 @@
 ---
-
-- name: "install list of base packages"
-  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+- name: Install locales and keyboard packages
+  when: ansible_distribution in ['Debian', 'Ubuntu']
   become: true
-  apt:
-    name: "{{ item }}"
+  ansible.builtin.apt:
+    name:
+      - console-setup
+      - kbd
+      - keyboard-configuration
+      - locales
     state: present
-  with_items:
-    - locales
 
-- name: "configure /etc/default/locale"
+- name: Ensure en_US.UTF-8 and fr_FR.UTF-8 locales exist
   become: true
-  copy:
+  community.general.locale_gen:
+    name:
+      - en_US.UTF-8
+      - fr_FR.UTF-8
+    state: present
+
+- name: Configure /etc/locale.conf
+  become: true
+  ansible.builtin.copy:
     src: "locale"
+    dest: "/etc/locale.conf"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Link /etc/default/locale to /etc/locale.conf
+  become: true
+  ansible.builtin.file:
+    src: "../locale.conf"
     dest: "/etc/default/locale"
-    mode: 0644
+    state: link
+    force: true
 
-- name: "configure /etc/locale.gen"
+- name: Configure French keyboard layout in /etc/default/keyboard
   become: true
-  copy:
-    src: "locale.gen"
-    dest: "/etc/locale.gen"
-    mode: 0644
-
-- name: "ensure en_US.UTF-8 locale exists"
-  become: true
-  locale_gen:
-    name: en_US.UTF-8
-    state: present
-
-- name: "ensure fr_FR.UTF-8 locale exists"
-  become: true
-  locale_gen:
-    name: fr_FR.UTF-8
-    state: present
+  ansible.builtin.copy:
+    src: "keyboard"
+    dest: "/etc/default/keyboard"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Update console keymap

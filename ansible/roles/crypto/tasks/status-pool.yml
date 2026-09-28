@@ -1,0 +1,75 @@
+---
+- name: "Set facts for disk query: {{ current_disk.name }}"
+  ansible.builtin.set_fact:
+    crypto_query_disk_mount: "{{ current_disk.subvolumes[0] }}"
+
+- name: "Query LUKS status for pool members: {{ current_disk.name }}"
+  ansible.builtin.command:
+    cmd: "cryptsetup status {{ current_disk.name }}-{{ idx }}"
+  loop: "{{ current_disk.devices }}"
+  loop_control:
+    index_var: idx
+  register: crypto_luks_status_cmds
+  changed_when: false
+  failed_when: false
+
+- name: "Check LUKS header backup status for pool members: {{ current_disk.name }}"
+  become: true
+  ansible.builtin.stat:
+    path: "/var/backups/luks/luks-header-{{ current_disk.name }}-{{ idx }}.img"
+  loop: "{{ current_disk.devices }}"
+  loop_control:
+    index_var: idx
+  register: crypto_luks_backup_stats
+
+- name: "Query Btrfs filesystem usage: {{ current_disk.name }}"
+  ansible.builtin.command:
+    cmd: "btrfs filesystem usage {{ crypto_query_disk_mount }}"
+  register: crypto_btrfs_usage_cmd
+  changed_when: false
+  failed_when: false
+
+- name: "Query Btrfs device stats: {{ current_disk.name }}"
+  ansible.builtin.command:
+    cmd: "btrfs device stats {{ crypto_query_disk_mount }}"
+  register: crypto_btrfs_dev_stats_cmd
+  changed_when: false
+  failed_when: false
+
+- name: "Check disk SMART health for pool members: {{ current_disk.name }}"
+  become: true
+  ansible.builtin.command:
+    cmd: "smartctl -H {{ item }}"
+  loop: "{{ current_disk.devices }}"
+  register: crypto_smart_status_cmds
+  changed_when: false
+  failed_when: false
+
+- name: "Display Status for Disk Pool: {{ current_disk.name }}"
+  ansible.builtin.debug:
+    msg: |
+      =======================================================
+      STORAGE POOL REPORT: {{ current_disk.name }} ({{ inventory_hostname }})
+      Target Devices: {{ current_disk.devices | join(', ') }}
+      LUKS Containers: {% for i in range(current_disk.devices | length) %}/dev/mapper/{{ current_disk.name }}-{{ i }} {% endfor %}
+
+      Subvolume Mounts: {{ current_disk.subvolumes | join(', ') }}
+      =======================================================
+
+      --- MEMBER DEVICES (LUKS & SMART) ---
+      {% for res in crypto_luks_status_cmds.results %}
+      {% set hdr_file = '/var/backups/luks/luks-header-' ~ current_disk.name ~ '-' ~ (loop.index0 | string) ~ '.img (Present)' %}
+      [Member {{ loop.index0 }} - {{ current_disk.devices[loop.index0] }}]
+      Mapper: /dev/mapper/{{ current_disk.name }}-{{ loop.index0 }}
+      Header Backup: {{ hdr_file if crypto_luks_backup_stats.results[loop.index0].stat.exists else 'MISSING!' }}
+      {{ res.stdout | default('LUKS container is not open or not found.', true) }}
+      SMART Health:
+      {{ crypto_smart_status_cmds.results[loop.index0].stdout | default('SMART not available for this device type.', true) }}
+
+      {% endfor %}
+      --- BTRFS USAGE & ALLOCATION ---
+      {{ crypto_btrfs_usage_cmd.stdout | default('Btrfs filesystem is not mounted.', true) }}
+
+      --- BTRFS DEVICE STATS & INTEGRITY ---
+      {{ crypto_btrfs_dev_stats_cmd.stdout | default('Device stats unavailable.', true) }}
+      =======================================================

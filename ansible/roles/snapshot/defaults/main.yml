@@ -1,0 +1,5 @@
+---
+snapshot_user: "{{ ansible_user }}"
+snapshot_jobs: []
+snapshot_keep_daily: 30
+snapshot_keep_weekly: 52

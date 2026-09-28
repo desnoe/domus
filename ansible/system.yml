@@ -1,0 +1,20 @@
+---
+- name: Configure system base services and security
+  hosts: all
+  become: true
+  roles:
+    - apt
+    - base
+    - htop
+    - locales
+    - ntp
+    - sshd
+    - sudo
+    - ufw
+    - vim
+
+- name: Configure GitHub Actions self-hosted runner
+  hosts: runner
+  become: true
+  roles:
+    - runner

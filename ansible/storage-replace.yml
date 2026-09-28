@@ -1,0 +1,11 @@
+---
+- name: Replace failed drive in Btrfs RAID1 storage pool
+  hosts: crypto
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Run disk replacement workflow
+      ansible.builtin.include_role:
+        name: crypto
+        tasks_from: replace

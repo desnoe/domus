@@ -1,0 +1,32 @@
+---
+- name: Query effective SSH daemon security settings
+  become: true
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      /usr/sbin/sshd -T | grep -E '^(port|permitrootlogin|passwordauthentication|pubkeyauthentication) '
+    executable: /bin/bash
+  register: sshd_config_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Query authorized SSH key fingerprints for user
+  become: true
+  ansible.builtin.command:
+    cmd: "ssh-keygen -lf /home/{{ ansible_user }}/.ssh/authorized_keys"
+  register: sshd_keys_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Display SSHD Status Summary
+  ansible.builtin.debug:
+    msg: |-
+      =======================================================
+      SSHD SECURITY & KEYS REPORT: {{ inventory_hostname }}
+      =======================================================
+      --- EFFECTIVE SSHD SETTINGS ---
+      {{ sshd_config_cmd.stdout | default('sshd -T unavailable.', true) }}
+
+      --- AUTHORIZED KEYS ({{ ansible_user }}) ---
+      {{ sshd_keys_cmd.stdout | default('No authorized_keys found.', true) }}
+      =======================================================

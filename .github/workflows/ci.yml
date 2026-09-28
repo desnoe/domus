@@ -1,0 +1,111 @@
+---
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      run_lab_tests:
+        description: "Run full destructive lab integration tests on runner.delarche.fr"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ANSIBLE_HOME: /tmp/.ansible
+  UV_PYTHON: "3.11"
+
+jobs:
+  lint-and-syntax:
+    name: Lint & Syntax Check (Cloud)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv and Python 3.11
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          python-version: "3.11"
+
+      - name: Install Python dependencies from lockfile
+        run: uv sync --frozen
+
+      - name: Install pinned Ansible Galaxy collections
+        run: uv run ansible-galaxy collection install -r ansible/requirements.yml -p ansible/collections
+
+      - name: Create placeholder vault password file for static checks
+        run: |
+          echo "ci-static-placeholder" > ~/.ansible_vault_pass
+          chmod 600 ~/.ansible_vault_pass
+
+      - name: Run full pre-commit suite (16 hooks)
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+
+      - name: Verify syntax of all Ansible playbooks
+        run: |
+          for playbook in ansible/*.yml; do
+            if [ "$(basename "$playbook")" = "requirements.yml" ]; then
+              continue
+            fi
+            echo "Checking syntax: $playbook"
+            uv run ansible-playbook --syntax-check "$playbook"
+          done
+
+  integration-tests-local:
+    name: Full Lab Non-Regression Campaign (Self-Hosted)
+    needs: lint-and-syntax
+    if: github.event_name == 'workflow_dispatch' && inputs.run_lab_tests == true
+    runs-on: self-hosted
+    environment: local-runner
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv and Python 3.11
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          python-version: "3.11"
+
+      - name: Install Python dependencies from lockfile
+        run: uv sync --frozen
+
+      - name: Install pinned Ansible Galaxy collections
+        run: uv run ansible-galaxy collection install -r ansible/requirements.yml -p ansible/collections
+
+      - name: Verify local runner prerequisites (Vault, Rclone, Lab SSH)
+        env:
+          VAULT_SECRET: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+          RCLONE_CONF_SECRET: ${{ secrets.RCLONE_CONF }}
+        run: ./scripts/test-lab.sh check-prereqs
+
+      - name: "Step 1: System Baseline Idempotence & UFW Drift Remediation (TC-SYS-01, TC-FW-03)"
+        run: ./scripts/test-lab.sh system-and-ufw
+
+      - name: "Step 2: Storage Wipe & Unlock Idempotence (TC-STO-01..02)"
+        run: ./scripts/test-lab.sh storage-wipe-and-unlock
+
+      - name: "Step 3: Backup Idempotence, OneDrive Sync & Btrfs Snapshot (TC-BAK-01..03)"
+        run: ./scripts/test-lab.sh backup-and-sync
+
+      - name: "Step 4: Advanced Corner Cases, Header Restore & RAID1 Rebuild (TC-ADV-01..06)"
+        run: ./scripts/test-lab.sh corner-cases-and-raid1
+
+      - name: "Step 5: Full System, Storage & Backup Health Report (TC-BAK-04)"
+        run: ./scripts/test-lab.sh status

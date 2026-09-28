@@ -1,23 +1,33 @@
 ---
-
-- name: "install required packages"
-  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+- name: Install vim package
+  when: ansible_distribution in ['Debian', 'Ubuntu']
   become: true
-  apt:
-    name: "{{ item }}"
+  ansible.builtin.apt:
+    name:
+      - vim
     state: present
-  with_items:
-    - vim
 
-- name: "setup .vimrc for root"
+- name: Set vim.basic as default system editor
+  when: ansible_distribution in ['Debian', 'Ubuntu']
   become: true
-  copy:
+  community.general.alternatives:
+    name: editor
+    path: /usr/bin/vim.basic
+
+- name: Setup .vimrc for root
+  become: true
+  ansible.builtin.copy:
     src: "vimrc"
     dest: "/root/.vimrc"
-    mode: 0644
+    owner: root
+    group: root
+    mode: "0644"
 
-- name: "setup .vimrc"
-  copy:
+- name: Setup .vimrc for user
+  become: true
+  ansible.builtin.copy:
     src: "vimrc"
-    dest: "~/.vimrc"
-    mode: 0644
+    dest: "/home/{{ ansible_user }}/.vimrc"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0644"

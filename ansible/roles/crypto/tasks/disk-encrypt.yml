@@ -1,46 +1,51 @@
 ---
-- name: unmount sync
+- name: "Identify any active mapper on device: {{ dev_item }}"
   become: true
-  ansible.posix.mount:
-    path: "{{ crypto_base_dir }}/sync"
-    state: unmounted
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -o pipefail
+      lsblk -rno NAME,TYPE {{ dev_item }} | awk '$2 == "crypt" {print $1}'
+  register: crypto_active_crypt_holders
+  changed_when: false
 
-- name: unmount snapshots
+- name: "Unmount any filesystems using active mapper and close mapper on device: {{ dev_item }}"
+  when: crypto_active_crypt_holders.stdout_lines | length > 0
   become: true
-  ansible.posix.mount:
-    path: "{{ crypto_base_dir }}/snapshots"
-    state: unmounted
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -euo pipefail
+      uuid=$(blkid -s UUID -o value "/dev/mapper/{{ item }}" 2>/dev/null || true)
+      label=$(blkid -s LABEL -o value "/dev/mapper/{{ item }}" 2>/dev/null || true)
+      if [ -n "$uuid" ]; then
+        for mp in $(findmnt -rn -o TARGET,UUID | awk -v u="$uuid" '$2 == u {print $1}'); do
+          umount "$mp" 2>/dev/null || true
+        done
+      fi
+      if [ -n "$label" ]; then
+        for mp in $(awk -v l="LABEL=$label" '$1 == l {print $2}' /etc/fstab); do
+          umount "$mp" 2>/dev/null || true
+        done
+        sed -i "/^LABEL=${label}[[:space:]]/d" /etc/fstab
+      fi
+      umount "/dev/mapper/{{ item }}" 2>/dev/null || true
+      btrfs device scan --forget "/dev/mapper/{{ item }}" 2>/dev/null || true
+      cryptsetup luksClose "{{ item }}"
+      rm -f "/var/backups/luks/luks-header-{{ item }}.img"
+  loop: "{{ crypto_active_crypt_holders.stdout_lines }}"
+  changed_when: true
 
-- name: "check if encrypted volume exists or not"
-  ansible.builtin.stat:
-    path: /dev/mapper/{{ luks_name }}
-  register: luks_volume
+- name: "Format LUKS encrypted device: {{ dev_item }}"
+  become: true
+  no_log: true
+  ansible.builtin.command:
+    cmd: "cryptsetup luksFormat -q -v -c aes-xts-plain64 -h sha256 {{ dev_item }} --key-file -"
+    stdin: "{{ crypto_disk_passphrase }}"
+  changed_when: true
 
-- name: "close volume group"
+- name: "Remove stale LUKS header backup if wiping: {{ crypto_disk_name ~ '-' ~ dev_idx }}"
   become: true
-  shell: lvchange -an vg_data
-  when: luks_volume.stat.exists
-
-- name: "close encrypted disk"
-  become: true
-  shell: cryptsetup luksClose /dev/mapper/{{ luks_name }}
-  when: luks_volume.stat.exists
-
-- name: "create temp file"
-  become: true
-  command: mktemp /tmp/encdisk.XXXXXXX
-  register: tmp
-
-- name: "write password to temp file"
-  become: true
-  template:
-    src: templates/encrypt-pass.j2
-    dest: "{{ tmp.stdout }}"
- 
-- name: "encrypt disk"
-  become: true
-  shell: cat {{ tmp.stdout }} | cryptsetup luksFormat -v -c aes-xts-plain64 -h sha256 {{ luks_dev }}
-
-- name: "purge temp file"
-  become: true
-  command: shred -z -u {{ tmp.stdout }}
+  ansible.builtin.file:
+    path: "/var/backups/luks/luks-header-{{ crypto_disk_name }}-{{ dev_idx }}.img"
+    state: absent

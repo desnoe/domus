@@ -1,0 +1,62 @@
+---
+- name: "Verify subvolumes are defined for disk pool: {{ disk.name }}"
+  ansible.builtin.assert:
+    that:
+      - disk.subvolumes is defined
+      - disk.subvolumes | length > 0
+    fail_msg: "Pool '{{ disk.name }}' must define at least one absolute mount path in 'subvolumes'."
+
+- name: "Set operational facts for disk: {{ disk.name }}"
+  ansible.builtin.set_fact:
+    crypto_disk_name: "{{ disk.name }}"
+    crypto_disk_devices: "{{ disk.devices }}"
+    crypto_disk_passphrase: "{{ disk.passphrase | default(luks_pass) }}"
+    crypto_disk_subvolumes: "{{ disk.subvolumes }}"
+
+- name: "Unmount subvolumes and clean fstab entries before wipe: {{ crypto_disk_name }}"
+  when: crypto_wipe | default(false) | bool
+  become: true
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -euo pipefail
+      for mp in $(awk '$1 == "LABEL={{ crypto_disk_name }}" {print $2}' /etc/fstab); do
+        umount "$mp" 2>/dev/null || true
+      done
+      sed -i '/^LABEL={{ crypto_disk_name }}[[:space:]]/d' /etc/fstab
+  changed_when: true
+
+- name: "(re-)encrypt member devices: {{ crypto_disk_name }}"
+  when: crypto_wipe | default(false) | bool
+  ansible.builtin.include_tasks: disk-encrypt.yml
+  loop: "{{ crypto_disk_devices }}"
+  loop_control:
+    loop_var: dev_item
+    index_var: dev_idx
+
+- name: "Decrypt and open member devices: {{ crypto_disk_name }}"
+  ansible.builtin.include_tasks: disk-decrypt.yml
+  loop: "{{ crypto_disk_devices }}"
+  loop_control:
+    loop_var: dev_item
+    index_var: dev_idx
+
+- name: "Backup LUKS headers for member devices: {{ crypto_disk_name }}"
+  ansible.builtin.include_tasks: header-backup.yml
+  loop: "{{ crypto_disk_devices }}"
+  loop_control:
+    loop_var: dev_item
+    index_var: dev_idx
+
+- name: "(re-)set filesystem: {{ crypto_disk_name }}"
+  when: crypto_wipe | default(false) | bool
+  ansible.builtin.include_tasks: fs-reset.yml
+
+- name: "Scan for multi-device Btrfs pools: {{ crypto_disk_name }}"
+  become: true
+  ansible.builtin.command:
+    cmd: "btrfs device scan"
+  changed_when: false
+
+- name: "Mount Btrfs subvolumes: {{ crypto_disk_name }}"
+  ansible.builtin.include_tasks: fs-mount.yml

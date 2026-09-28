@@ -1,0 +1,30 @@
+# Managed by Ansible - do not edit manually
+{% set src_mount_unit = (item.source | regex_replace('^/+', '') | regex_replace('/+$', '') | replace('/', '-')) ~ '.mount' %}
+{% set dst_mount_unit = (item.destination | regex_replace('^/+', '') | regex_replace('/+$', '') | replace('/', '-')) ~ '.mount' %}
+{% set snap_slug = item.name | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-+|-+$', '') %}
+[Unit]
+Description=Btrfs read-only snapshot and rotation for {{ item.name }} ({{ item.source }} -> {{ item.destination }})
+After={{ src_mount_unit }} {{ dst_mount_unit }}
+Requisite={{ src_mount_unit }} {{ dst_mount_unit }}
+PartOf={{ src_mount_unit }} {{ dst_mount_unit }}
+AssertPathIsMountPoint={{ item.source }}
+AssertPathIsMountPoint={{ item.destination }}
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+SyslogIdentifier=btrfs-snapshot-{{ snap_slug }}
+
+# Security & filesystem sandboxing (source subvolume is strictly read-only!)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths={{ item.destination }}
+
+ExecStart=/home/{{ snapshot_user }}/bin/snapshot.sh \
+    "{{ item.source }}" \
+    "{{ item.destination }}" \
+    "{{ item.keep_daily | default(snapshot_keep_daily) }}" \
+    "{{ item.keep_weekly | default(snapshot_keep_weekly) }}"

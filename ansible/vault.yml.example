@@ -1,0 +1,6 @@
+---
+# Template for expected variables in host_vars/<host>/vault.yml
+# This file serves as documentation and reference before encryption with ansible-vault.
+
+# Decryption passphrase for LUKS block devices
+luks_pass: "CHANGE_ME_LUKS_PASSPHRASE"

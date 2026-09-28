@@ -1,0 +1,76 @@
+---
+- name: Install ufw package
+  when: ansible_distribution in ['Debian', 'Ubuntu']
+  become: true
+  ansible.builtin.apt:
+    name:
+      - ufw
+    state: present
+
+- name: Ensure IPv6 is enabled in UFW configuration
+  become: true
+  ansible.builtin.lineinfile:
+    path: /etc/default/ufw
+    regexp: "^IPV6="
+    line: "IPV6=yes"
+    mode: "0644"
+
+- name: Check if legacy /etc/network/iptables.up.rules exists
+  become: true
+  ansible.builtin.stat:
+    path: /etc/network/iptables.up.rules
+  register: ufw_legacy_rules_stat
+
+- name: Remove legacy /etc/network/iptables.up.rules file
+  when: ufw_legacy_rules_stat.stat.exists
+  become: true
+  ansible.builtin.file:
+    path: /etc/network/iptables.up.rules
+    state: absent
+
+- name: Flush legacy non-UFW iptables INPUT rules on transition
+  when: ufw_legacy_rules_stat.stat.exists
+  become: true
+  ansible.builtin.command:
+    cmd: iptables -F INPUT
+  changed_when: true
+
+- name: Configure UFW allowed rules before enabling firewall
+  become: true
+  community.general.ufw:
+    rule: "{{ item.rule | default('allow') }}"
+    port: "{{ item.port }}"
+    proto: "{{ item.proto | default('tcp') }}"
+    from_ip: "{{ item.from_ip | default('any') }}"
+    comment: "{{ item.comment | default(omit) }}"
+  loop: "{{ ufw_rules }}"
+
+- name: Configure UFW default incoming policy
+  become: true
+  community.general.ufw:
+    default: "{{ ufw_default_incoming_policy }}"
+    direction: incoming
+
+- name: Configure UFW default outgoing policy
+  become: true
+  community.general.ufw:
+    default: "{{ ufw_default_outgoing_policy }}"
+    direction: outgoing
+
+- name: Configure UFW default routed policy
+  become: true
+  community.general.ufw:
+    default: "{{ ufw_default_routed_policy }}"
+    direction: routed
+
+- name: Enable UFW firewall
+  become: true
+  community.general.ufw:
+    state: enabled
+
+- name: Ensure UFW systemd service is enabled at boot
+  become: true
+  ansible.builtin.service:
+    name: ufw
+    state: started
+    enabled: true

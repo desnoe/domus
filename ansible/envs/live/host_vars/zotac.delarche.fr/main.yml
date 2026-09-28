@@ -1,2 +1,13 @@
-luks_dev: /dev/sda
-luks_name: crypt_sda
+---
+crypto_disks:
+  - name: data
+    devices:
+      - /dev/sda
+    subvolumes:
+      - "/home/{{ ansible_user }}/data/sync"
+      - "/home/{{ ansible_user }}/data/snapshots"
+
+snapshot_jobs:
+  - name: data
+    source: "/home/{{ ansible_user }}/data/sync"
+    destination: "/home/{{ ansible_user }}/data/snapshots"
