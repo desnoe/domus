@@ -1,0 +1,14 @@
+# Managed by Ansible - do not edit manually
+{% set snap_slug = item.name | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-+|-+$', '') %}
+{% set timer_hour = item.hour | default(5) | int %}
+{% set timer_minute = item.minute | default(0) | int %}
+[Unit]
+Description=Daily timer for Btrfs snapshot ({{ item.name }})
+
+[Timer]
+OnCalendar=*-*-* {{ "%02d:%02d:00" | format(timer_hour, timer_minute) }}
+Persistent=true
+Unit=btrfs-snapshot-{{ snap_slug }}.service
+
+[Install]
+WantedBy=timers.target

@@ -86,14 +86,14 @@ rsync -aHAXv ~/data/snapshots/2026-09-24--09-06-44/path/to/folder/ ~/data/sync/p
 ```
 
 ### 3. Trigger a manual snapshot
-You can execute an ad-hoc snapshot at any time using the reusable CLI script:
+You can trigger an ad-hoc snapshot at any time via the systemd service (or the CLI script):
 
 ```bash
-$HOME/bin/snapshot.sh $HOME/data/sync $HOME/data/snapshots
+sudo systemctl start btrfs-snapshot-data.service
 ```
-Custom retention (e.g. 14 daily, 8 weekly) can be passed optionally:
+Or directly with custom retention (e.g. 14 daily, 8 weekly):
 ```bash
-$HOME/bin/snapshot.sh $HOME/data/sync $HOME/data/snapshots 14 8
+sudo "$HOME/bin/snapshot.sh" "$HOME/data/sync" "$HOME/data/snapshots" 14 8
 ```
 
 ---
@@ -187,10 +187,10 @@ When replacing all disks simultaneously or resetting an entire pool from scratch
    uv run ansible-playbook -i ansible/envs/<env>/inventory.ini ansible/backup.yml
    ```
 
-4. **Trigger initial cloud restore**:
+4. **Trigger initial cloud sync**:
    ```bash
-   $HOME/bin/rclone.sh onedrive $HOME/data/sync
-   $HOME/bin/rclone.sh S3 $HOME/data/sync delarche-images
+   sudo systemctl start rclone-sync-onedrive-share-50ans.service
+   sudo systemctl start rclone-sync-s3-delarche-images.service
    ```
 
 ---

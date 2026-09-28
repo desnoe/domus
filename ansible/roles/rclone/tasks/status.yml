@@ -1,21 +1,75 @@
 ---
-- name: Query recent rclone backup logs
-  when: (crypto_disks | default([])) | length > 0
-  ansible.builtin.shell:
-    executable: /bin/bash
-    cmd: |
-      set -o pipefail
-      ls -t /home/{{ ansible_user }}/logs/*/*.log /home/{{ ansible_user }}/logs/*/*/*.log 2>/dev/null | head -n 5
-  register: rclone_recent_logs_cmd
+- name: Query rclone version
+  ansible.builtin.command:
+    cmd: rclone --version
+  register: rclone_version_cmd
   changed_when: false
   failed_when: false
 
-- name: Display Rclone Backup Logs Summary
-  when: (crypto_disks | default([])) | length > 0
+- name: Check rclone configuration file status
+  become: true
+  ansible.builtin.stat:
+    path: "/home/{{ ansible_user }}/.config/rclone/rclone.conf"
+  register: rclone_conf_stat
+
+- name: Query configured rclone remotes
+  when: rclone_conf_stat.stat.exists and rclone_conf_stat.stat.size > 0
+  become: true
+  ansible.builtin.command:
+    cmd: "rclone listremotes --config /home/{{ ansible_user }}/.config/rclone/rclone.conf"
+  register: rclone_remotes_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Query rclone systemd timers  # noqa: command-instead-of-module
+  become: true
+  ansible.builtin.command:
+    cmd: "systemctl list-timers --all --no-pager 'rclone-sync-*'"
+  register: rclone_timers_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Query recent rclone systemd journal entries
+  become: true
+  ansible.builtin.command:
+    cmd: "journalctl -u 'rclone-sync-*.service' -n 15 --no-pager"
+  register: rclone_journal_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Display Rclone Cloud Sync Status Report
+  vars:
+    rclone_configured_remotes: >-
+      {{
+        (rclone_remotes_cmd.stdout_lines | default([]))
+        | map('regex_replace', ':$', '')
+        | list
+      }}
+    rclone_required_providers: >-
+      {{
+        (rclone_jobs | default([]))
+        | map(attribute='provider')
+        | unique
+        | list
+      }}
   ansible.builtin.debug:
     msg: |
       =======================================================
-      RCLONE BACKUP LOGS REPORT: {{ inventory_hostname }}
+      RCLONE CLOUD SYNC REPORT: {{ inventory_hostname }}
       =======================================================
-      {{ rclone_recent_logs_cmd.stdout | default('No rclone logs found.', true) }}
+      Rclone version: {{ rclone_version_cmd.stdout_lines | first | default('Not installed') }}
+      Config file (/home/{{ ansible_user }}/.config/rclone/rclone.conf):
+        Present: {{ rclone_conf_stat.stat.exists }}
+        Mode: {{ rclone_conf_stat.stat.mode | default('N/A') }} (size: {{ rclone_conf_stat.stat.size | default(0) }} bytes)
+      Configured remotes: {{ rclone_configured_remotes | join(', ') if (rclone_configured_remotes | length > 0) else 'None' }}
+      Required providers status:
+      {% for prov in rclone_required_providers %}
+        - {{ prov }}: {{ 'Configured' if prov in rclone_configured_remotes else 'MISSING (run rclone config)' }}
+      {% endfor %}
+      -------------------------------------------------------
+      Systemd Timers:
+      {{ rclone_timers_cmd.stdout | default('No rclone timers found.', true) }}
+      -------------------------------------------------------
+      Recent Journal Logs (rclone-sync-*.service):
+      {{ rclone_journal_cmd.stdout | default('No journal entries found.', true) }}
       =======================================================

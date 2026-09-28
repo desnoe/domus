@@ -8,8 +8,9 @@
     owner: "{{ snapshot_user }}"
     group: "{{ snapshot_user }}"
 
-- name: Copy snapshot script
+- name: Copy Btrfs snapshot script
   when: ansible_distribution in ['Debian', 'Ubuntu']
+  become: true
   ansible.builtin.copy:
     src: "snapshot.sh"
     dest: "/home/{{ snapshot_user }}/bin/snapshot.sh"
@@ -17,13 +18,46 @@
     owner: "{{ snapshot_user }}"
     group: "{{ snapshot_user }}"
 
-- name: "Configure Btrfs snapshot cron: {{ item.name }}"
-  ansible.builtin.cron:
-    name: "snapshot {{ item.name }}"
-    user: "{{ snapshot_user }}"
-    hour: "{{ item.hour | default('5') }}"
-    minute: "{{ item.minute | default('0') }}"
-    job: >-
-      /home/{{ snapshot_user }}/bin/snapshot.sh {{ item.source }} {{ item.destination }}{%- if item.keep_daily is defined or item.keep_weekly is defined %}
-      {{ item.keep_daily | default(snapshot_keep_daily) }} {{ item.keep_weekly | default(snapshot_keep_weekly) }}{% endif %}
+- name: "Deploy Btrfs snapshot systemd service unit: {{ item.name }}"
+  become: true
+  ansible.builtin.template:
+    src: btrfs-snapshot.service.j2
+    dest: >-
+      /etc/systemd/system/btrfs-snapshot-{{
+        item.name | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-+|-+$', '')
+      }}.service
+    mode: "0644"
+    owner: root
+    group: root
   loop: "{{ snapshot_jobs | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: "Deploy Btrfs snapshot systemd timer unit: {{ item.name }}"
+  become: true
+  ansible.builtin.template:
+    src: btrfs-snapshot.timer.j2
+    dest: >-
+      /etc/systemd/system/btrfs-snapshot-{{
+        item.name | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-+|-+$', '')
+      }}.timer
+    mode: "0644"
+    owner: root
+    group: root
+  loop: "{{ snapshot_jobs | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: "Enable and start Btrfs snapshot systemd timer: {{ item.name }}"
+  become: true
+  ansible.builtin.systemd_service:
+    name: >-
+      btrfs-snapshot-{{
+        item.name | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-+|-+$', '')
+      }}.timer
+    daemon_reload: true
+    enabled: true
+    state: started
+  loop: "{{ snapshot_jobs | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"

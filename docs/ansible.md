@@ -16,8 +16,8 @@ flowchart TD
     LUKS1 -->|"Btrfs RAID1 Pool (LABEL=data)"| RootBtrfs
     RootBtrfs --> SubvolSync["Subvolume: home_olivier_data_sync (Mounted at /home/olivier/data/sync)"]
     RootBtrfs --> SubvolSnap["Subvolume: home_olivier_data_snapshots (Mounted at /home/olivier/data/snapshots)"]
-    Cloud["Cloud Storage (OneDrive, S3)"] -->|"Staggered Rclone Cron (04:00, 04:15, ...)"| SubvolSync
-    SubvolSync -->|"Daily Snapshot Cron (05:00, 30-daily + 52-weekly retention)"| SubvolSnap
+    Cloud["Cloud Storage (OneDrive, S3)"] -->|"rclone-sync-*.timer/.service (04:00, 04:15, ...)"| SubvolSync
+    SubvolSync -->|"btrfs-snapshot-*.timer/.service (05:00, 30-daily + 52-weekly retention)"| SubvolSnap
 ```
 
 ### Technical Rationale & Storage Layers
@@ -41,6 +41,33 @@ flowchart TD
    - `user_subvol_rm_allowed`: Enables snapshot rotation by `ansible_user` without root elevation.
    - `compress=zstd:3`: Transparent filesystem-level compression reducing flash wear and disk space usage.
    - `noatime`: Eliminates metadata write overhead on read operations.
+
+4. **Systemd Backup Services & Timers (`rclone-sync-*` & `btrfs-snapshot-*`)**:
+   - Instead of legacy `cron` jobs and wrapper scripts, both cloud synchronization (`rclone`) and local Btrfs snapshots (`snapshot`) are orchestrated by native `systemd.service` and `systemd.timer` units under `/etc/systemd/system/`.
+   - Every Btrfs subvolume in `/etc/fstab` exposes a native systemd mount unit (e.g., `/home/olivier/data/sync` $\rightarrow$ `home-olivier-data-sync.mount`). Binding the backup services directly to these `.mount` units guarantees that backups never write to the root partition (`/`) when storage is locked after a reboot, and immediately terminates running jobs if storage is unmounted mid-run.
+
+#### Reference: `systemd.service` and `systemd.timer` Directives & Security Intentions
+
+| Section | Directive | Configured Value | Security & Reliability Intent |
+| :--- | :--- | :--- | :--- |
+| `[Unit]` | `After=` | `network-online.target <unit>.mount` | Ensures the network stack (for `rclone`) and the target Btrfs subvolume `.mount` unit(s) are fully online before starting the service. |
+| `[Unit]` | `Wants=` | `network-online.target` | Pulls in network readiness checks so `rclone` does not start before routing/DNS are up. |
+| `[Unit]` | `Requisite=` | `<unit>.mount` | **Pre-start lock protection**: If the Btrfs subvolume `.mount` unit is not currently active (e.g., after a reboot before `storage-unlock.yml` has been run), `systemd` immediately aborts the service (`Dependency failed`) **without** attempting to mount the locked LUKS device or writing a single byte to `/`. |
+| `[Unit]` | `PartOf=` | `<unit>.mount` | **Live unmount kill-switch**: Couples the service's lifecycle to the `.mount` unit. If the Btrfs subvolume is unmounted while a sync or snapshot rotation is in progress, PID 1 immediately terminates the service's cgroup via `SIGTERM` (replacing fragile shell `sleep` polling loops). |
+| `[Unit]` | `AssertPathIsMountPoint=` | `{{ item.destination }}` (and `{{ item.source }}`) | **Kernel VFS mountpoint assertion**: Verifies at the kernel VFS layer that the directory is an active mountpoint before running `ExecStartPre` or `ExecStart`. |
+| `[Service]` | `Type=` | `oneshot` | Runs the backup command to completion before transitioning to inactive, and **natively prevents concurrent overlapping runs** of the same unit without needing `flock` lockfiles. |
+| `[Service]` | `User=` / `Group=` | `{{ ansible_user }}` (`rclone`) / `root` (`snapshot`) | Runs `rclone` as the unprivileged user, and runs `snapshot.sh` with `CAP_SYS_ADMIN` so expired read-only (`ro`) Btrfs snapshots can be cleared and deleted reliably. |
+| `[Service]` | `SyslogIdentifier=` | `rclone-sync-<slug>` / `btrfs-snapshot-<name>` | Tags all standard output and error lines in `systemd-journald` for structured filtering and automatic log rotation (replacing manual `~/logs` files and `find -delete`). |
+| `[Service]` | `NoNewPrivileges=` | `true` | Prevents the process and any child processes from acquiring additional privileges via `setuid`/`setgid` binaries or filesystem capabilities. |
+| `[Service]` | `PrivateTmp=` | `true` | Assigns an isolated, private `/tmp` and `/var/tmp` mount namespace to the service that is automatically destroyed when the unit exits. |
+| `[Service]` | `ProtectSystem=` | `strict` | Mounts the entire operating system hierarchy (`/`, `/usr`, `/boot`, `/etc`, `/var`) **read-only** inside the service's private mount namespace. |
+| `[Service]` | `ProtectHome=` | `read-only` | Mounts `/home`, `/root`, and `/run/user` **read-only** inside the service's private mount namespace. |
+| `[Service]` | `ReadWritePaths=` | `{{ item.destination }}` (+ `~/.config/rclone` for `rclone`) | Explicitly grants write access **only** to the target Btrfs subvolume (and `~/.config/rclone` so `rclone` can save refreshed OAuth2 tokens). For `btrfs-snapshot-*`, **even the source subvolume (`{{ item.source }}`) remains strictly read-only**! |
+| `[Service]` | `ExecStartPre=` | `test -s ...`, `chmod 0600 ...`, `mkdir -p ...` | (`rclone` only) Fails fast if `rclone.conf` is missing or empty, enforces `0600` permissions on credentials prior to each run, and ensures the `<destination>/<provider>[/<bucket>]` directory exists. |
+| `[Service]` | `ExecStart=` | `/usr/bin/rclone sync ...` / `snapshot.sh ...` | Executes `/usr/bin/rclone sync` directly without any shell wrapper (`--modify-window 1s`, `--delete-during`, `--create-empty-src-dirs`, `--delete-excluded`, `--retries 3`, `--low-level-retries 10`, `--timeout 5m`, `--contimeout 60s`, plus optional `--filter` rules). |
+| `[Timer]` | `OnCalendar=` | `*-*-* HH:MM:00` | Triggers daily execution at the configured local time (`Europe/Paris`, defaulting to `04:00` + 15 min/job for `rclone` and `05:00` for `snapshot`). |
+| `[Timer]` | `Persistent=` | `true` | Stores the last trigger timestamp in `/var/lib/systemd/timers/` so missed executions while powered off are caught up when the server comes back online. |
+| `[Install]` | `WantedBy=` | `timers.target` | Enables the timer automatically at boot as part of the standard systemd timer target. |
 
 ---
 
@@ -85,7 +112,7 @@ Configures hardware layout and backup targets:
         - "/home/{{ ansible_user }}/data/sync"
         - "/home/{{ ansible_user }}/data/snapshots"
   ```
-- `snapshot_jobs`: Declarative list of Btrfs snapshot jobs scheduled via crontab:
+- `snapshot_jobs`: Declarative list of Btrfs snapshot jobs scheduled via `systemd.timer` (`btrfs-snapshot-<name>.timer` / `.service`):
   ```yaml
   snapshot_jobs:
     - name: data
@@ -94,15 +121,20 @@ Configures hardware layout and backup targets:
       # optional retention & schedule:
       # keep_daily: 30
       # keep_weekly: 52
-      # hour: "5"
-      # minute: "0"
+      # hour: 5
+      # minute: 0
   ```
-- `rclone_jobs`: List of cloud remotes, buckets, and target destination directories to sync via rclone:
+- `rclone_jobs`: List of cloud remotes, buckets/paths, optional filter rules, and target destination directories to sync via `rclone` (`rclone-sync-<slug>.timer` / `.service`):
   ```yaml
   rclone_jobs:
-    - provider: onedrive
-      bucket: ""
+    - provider: OneDrive
+      bucket: Share/50ans
       destination: "/home/{{ ansible_user }}/data/sync"
+      # optional schedule & filters:
+      # hour: 4
+      # minute: 0
+      # filters:
+      #   - "- .DS_Store"
     - provider: S3
       bucket: delarche-images
       destination: "/home/{{ ansible_user }}/data/sync"
@@ -191,16 +223,18 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   ```
 
 ### 6. `ansible/backup.yml`
-- **Purpose**: Configures automated backup schedules and synchronization jobs.
+- **Purpose**: Configures automated Btrfs snapshot and cloud synchronization `systemd` services and timers.
 - **Target hosts**: `hosts: crypto`
-- **Roles executed**: `snapshot` (installs `snapshot.sh` and crontabs), `rclone` (installs `rclone.sh` and crontabs).
+- **Roles executed**:
+  - `snapshot`: Deploys `/home/{{ ansible_user }}/bin/snapshot.sh` and configures `/etc/systemd/system/btrfs-snapshot-<name>.{service,timer}`.
+  - `rclone`: Installs `rclone`, copies local `~/.config/rclone/rclone.conf` (`mode: "0600"`, `no_log: true`), and configures `/etc/systemd/system/rclone-sync-<slug>.{service,timer}`.
 - **Usage**:
   ```bash
   uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/backup.yml
   ```
 
 ### 7. `ansible/status.yml`
-- **Purpose**: Non-destructive, read-only diagnostic playbook reporting base host identity/uptime, locales/keyboard layout, time/NTP synchronization, SSH daemon settings and authorized key fingerprints, UFW firewall status, LUKS container status, header backups, SMART health, Btrfs usage and error stats, recent snapshots, and recent rclone logs.
+- **Purpose**: Non-destructive, read-only diagnostic playbook reporting base host identity/uptime, locales/keyboard layout, time/NTP synchronization, SSH daemon settings and authorized key fingerprints, UFW firewall status, LUKS container status, header backups, SMART health, Btrfs usage and error stats, `btrfs-snapshot-*` / `rclone-sync-*` systemd timers, `journald` logs, and `rclone` remote configuration status.
 - **Roles executed**: Modularly imports status tasks from `base`, `locales`, `ntp`, `sshd`, `ufw`, `crypto`, `snapshot`, and `rclone` roles.
 - **Usage**:
   ```bash
@@ -220,10 +254,10 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 
 ---
 
-## 🚑 Disaster Recovery & Emergency Operations
+## 🚑 Disaster Recovery & Verification Guides
 
-For manual recovery instructions without Ansible, snapshot restoration, or LUKS header restoration from `/var/backups/luks/`, see the dedicated guide:
-👉 **[Disaster Recovery & Storage Operations Guide](disaster-recovery.md)**
+- 👉 **[Disaster Recovery & Storage Operations Guide](disaster-recovery.md)**: Manual unlock without Ansible, snapshot restoration, and LUKS header restoration from `/var/backups/luks/`.
+- 👉 **[Test Book & Non-Regression Verification Guide](testing.md)**: Full catalog of test cards (`TC-QA`, `TC-SYS`, `TC-FW`, `TC-STO`, `TC-BAK`, `TC-ADV`) and master non-regression runbook.
 
 ---
 
@@ -237,8 +271,8 @@ For manual recovery instructions without Ansible, snapshot restoration, or LUKS 
 | **`htop`** | Installs `htop` and seeds initial user configuration (`force: false`). | `~/.config/htop/htoprc` |
 | **`locales`** | Generates `en_US.UTF-8` and `fr_FR.UTF-8` locales, configures English system UI (`LANG=en_US.UTF-8`) with French regional categories (`LC_TIME`, `LC_MEASUREMENT`, `LC_PAPER`, `LC_MONETARY=fr_FR.UTF-8`) in `/etc/locale.conf` (symlinked from `/etc/default/locale`), and configures French AZERTY keyboard (`fr`/`latin9`). | `/etc/locale.conf`, `/etc/default/locale`, `/etc/default/keyboard` |
 | **`ntp`** | Sets timezone (`Europe/Paris`) and configures `chrony` (`fr.pool.ntp.org`, `rtcsync`, `leapseclist`, and `leapsecmode slew` for monotonic leap seconds). | `/etc/chrony/chrony.conf`, `tzdata`, `chrony` service |
-| **`rclone`** | Installs `rclone`, sets up sync wrapper script (`/home/{{ ansible_user }}/bin/rclone.sh` with 30-day log rotation in `/home/{{ ansible_user }}/logs`), and configures staggered cron jobs for scheduled cloud backups. | `/home/{{ ansible_user }}/bin/rclone.sh`, user crontab |
-| **`snapshot`** | Manages Btrfs snapshot automation: installs reusable CLI script (`/home/{{ ansible_user }}/bin/snapshot.sh`), and configures declarative crontabs (`snapshot_jobs`) with parallel execution safety (per-destination lockfiles) and configurable retention (30 daily + 52 weekly). | `/home/{{ ansible_user }}/bin/snapshot.sh`, user crontab |
+| **`rclone`** | Installs `rclone`, copies local `~/.config/rclone/rclone.conf` (`mode: "0600"`, `no_log: true`), and deploys sandboxed `systemd` service and timer units (`rclone-sync-<slug>.{service,timer}`) invoking `/usr/bin/rclone sync` directly with kernel mount protection (`Requisite=`, `BindsTo=`, `AssertPathIsMountPoint=`) and `ProtectSystem=strict`. | `~/.config/rclone/rclone.conf`, `/etc/systemd/system/rclone-sync-*.{service,timer}` |
+| **`snapshot`** | Manages Btrfs snapshot automation: deploys streamlined `/home/{{ ansible_user }}/bin/snapshot.sh` (30 daily + 52 weekly ISO retention) and configures sandboxed `systemd` service and timer units (`btrfs-snapshot-<name>.{service,timer}`) with dual mount binding and read-only source protection (`ProtectSystem=strict`, `ReadWritePaths={{ item.destination }}`). | `/home/{{ ansible_user }}/bin/snapshot.sh`, `/etc/systemd/system/btrfs-snapshot-*.{service,timer}` |
 | **`sshd`** | Automatically discovers all local `~/.ssh/*.pub` public keys and synchronizes them to `~/.ssh/authorized_keys` (`exclusive: true`), and hardens `/etc/ssh/sshd_config` (disables root login and password authentication, validated via `sshd -t -f %s`). | `/etc/ssh/sshd_config`, `~/.ssh/authorized_keys` |
 | **`sudo`** | Creates `wheel` group, configures `/etc/sudoers.d/99-ansible-wheel` (validated via `visudo`), and configures user `{{ ansible_user }}` with wheel group membership and bash shell without managing local passwords. | `/etc/sudoers.d/99-ansible-wheel`, `/etc/passwd` |
 | **`ufw`** | Configures declarative dual-stack (IPv4/IPv6) packet filtering via `community.general.ufw` (`ufw_rules`), sets default policies (`incoming: deny`, `outgoing: allow`, `routed: deny`), cleans legacy `/etc/network/iptables.up.rules`, and enables `ufw.service` at boot. | `/etc/default/ufw`, `/etc/ufw/user.rules`, `/etc/ufw/user6.rules`, `ufw` service |

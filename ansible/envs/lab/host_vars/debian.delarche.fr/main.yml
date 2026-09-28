@@ -20,8 +20,8 @@ snapshot_jobs:
     destination: "/home/{{ ansible_user }}/data/snapshots"
 
 rclone_jobs:
-  - provider: onedrive
-    bucket: ""
+  - provider: OneDrive
+    bucket: Share/50ans
     destination: "/home/{{ ansible_user }}/data/sync"
   - provider: S3
     bucket: www.albatross-networks.com

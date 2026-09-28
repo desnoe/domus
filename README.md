@@ -11,8 +11,8 @@ Infrastructure as Code (IaC) repository for provisioning, hardening, and managin
   - **LUKS**: Block-level encryption with AES-256 (`luks_pass`) on each member device.
   - **Btrfs**: Filesystem management directly on decrypted LUKS containers with native RAID1 mirroring for multi-device pools, declarative subvolume mount paths, transparent zstd compression, and automated fstab integration.
 - **Automated Backups**:
-  - Daily read-only Btrfs snapshots scheduled via cron at 05:00.
-  - Multi-cloud synchronization via `rclone` (OneDrive and S3) scheduled at 04:00.
+  - Daily read-only Btrfs snapshots (`btrfs-snapshot-<name>.timer` / `.service` at 05:00) bound to source and destination `.mount` units and sandboxed with read-only source protection.
+  - Multi-cloud synchronization via `rclone` (`rclone-sync-<slug>.timer` / `.service` starting at 04:00) using direct `/usr/bin/rclone sync` execution, kernel mount binding, and `ProtectSystem=strict` sandboxing.
 - **System Hardening**: Baseline configuration covering `ufw` firewall (dual-stack IPv4/IPv6), SSH keys, locales, NTP, and administration tools.
 
 ---
@@ -106,13 +106,13 @@ uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-replac
 ```
 
 ### 6. Configure Backup Services (Snapshots & Rclone)
-Deploys `snapshot.sh`, `rclone.sh`, and user crontabs for automated Btrfs snapshotting and cloud sync:
+Copies your local `~/.config/rclone/rclone.conf` (`0600`), deploys `/home/{{ ansible_user }}/bin/snapshot.sh`, and configures sandboxed `systemd.service` and `systemd.timer` units for automated Btrfs snapshotting and cloud sync:
 ```bash
 uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/backup.yml
 ```
 
 ### 7. Check Storage and System Health (Read-Only)
-Inspects base system identity/uptime, locales/keyboard, time/NTP sync, SSH daemon/authorized keys, UFW firewall status, LUKS encryption status, header backup presence, SMART health, Btrfs usage/error stats, recent snapshots, and rclone logs:
+Inspects base system identity/uptime, locales/keyboard, time/NTP sync, SSH daemon/authorized keys, UFW firewall status, LUKS encryption status, header backup presence, SMART health, Btrfs usage/error stats, `btrfs-snapshot-*` / `rclone-sync-*` systemd timers, `journald` logs, and `rclone` remote configuration status:
 ```bash
 # Full health report
 uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml
@@ -126,6 +126,7 @@ uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --t
 ## 📚 Documentation & Guidelines
 
 - **[Detailed Ansible Architecture & Roles Guide](docs/ansible.md)**: Deep dive into all playbooks, roles, and storage layout.
+- **[Test Book & Non-Regression Verification Guide](docs/testing.md)**: Complete catalog of QA, system, firewall, storage, backup, and chaos test cases (`TC-*`).
 - **[Disaster Recovery & Storage Operations Guide](docs/disaster-recovery.md)**: Step-by-step procedures for emergency recovery, file restoration, and LUKS header repair.
 - **[AI Agent & Contributor Guidelines](AGENTS.md)**: Language policy (mandatory English), coding standards, and pre-commit rules.
 

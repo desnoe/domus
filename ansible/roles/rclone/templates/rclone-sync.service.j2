@@ -1,0 +1,49 @@
+# Managed by Ansible - do not edit manually
+{% set rclone_job_slug = ((item.provider ~ ('-' ~ item.bucket if (item.bucket | default('') | length > 0) else '')) | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-+|-+$', '')) %}
+{% set mount_unit = (item.destination | regex_replace('^/+', '') | regex_replace('/+$', '') | replace('/', '-')) ~ '.mount' %}
+{% set target_dir = item.destination ~ '/' ~ item.provider ~ ('/' ~ item.bucket if (item.bucket | default('') | length > 0) else '') %}
+[Unit]
+Description=Rclone sync for {{ item.provider }}{{ ':' ~ item.bucket if (item.bucket | default('') | length > 0) else ':' }} to {{ target_dir }}
+After=network-online.target {{ mount_unit }}
+Wants=network-online.target
+Requisite={{ mount_unit }}
+PartOf={{ mount_unit }}
+AssertPathIsMountPoint={{ item.destination }}
+
+[Service]
+Type=oneshot
+User={{ ansible_user }}
+Group={{ ansible_user }}
+SyslogIdentifier=rclone-sync-{{ rclone_job_slug }}
+
+# Security & filesystem sandboxing
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths={{ item.destination }} /home/{{ ansible_user }}/.config/rclone
+
+# Pre-flight checks: config exists, strict 0600 mode, and target directory exists
+ExecStartPre=/usr/bin/test -s /home/{{ ansible_user }}/.config/rclone/rclone.conf
+ExecStartPre=/usr/bin/chmod 0600 /home/{{ ansible_user }}/.config/rclone/rclone.conf
+ExecStartPre=/usr/bin/mkdir -p "{{ target_dir }}"
+
+ExecStart=/usr/bin/rclone sync \
+    --config /home/{{ ansible_user }}/.config/rclone/rclone.conf \
+    -v \
+    --stats-one-line \
+    --stats 1m \
+    --modify-window 1s \
+    --user-agent "ISV|rclone.org|rclone/v1.67.0" \
+    --delete-during \
+    --create-empty-src-dirs \
+    --delete-excluded \
+    --retries 3 \
+    --low-level-retries 10 \
+    --timeout 5m \
+    --contimeout 60s \
+{% for filter_rule in item.filters | default([]) %}
+    --filter "{{ filter_rule }}" \
+{% endfor %}
+    "{{ item.provider }}:{{ item.bucket | default('') }}" \
+    "{{ target_dir }}"
