@@ -4,19 +4,19 @@
     sshd_pub_key_files: >-
       {{ query('ansible.builtin.fileglob', lookup('ansible.builtin.env', 'HOME') + '/.ssh/*.pub') | sort }}
 
-- name: Ensure at least one local SSH public key exists before exclusive sync
+- name: Ensure at least one local SSH public key exists before sync
   ansible.builtin.assert:
     that:
       - sshd_pub_key_files | length > 0
     fail_msg: "No SSH public keys found in ~/.ssh/*.pub on controller. Aborting to prevent SSH lockout."
 
-- name: Synchronize all local SSH public keys to remote authorized_keys
+- name: Synchronize local SSH public keys to remote authorized_keys
   become: true
   ansible.posix.authorized_key:
     user: "{{ ansible_user }}"
     key: "{{ lookup('ansible.builtin.file', *sshd_pub_key_files, wantlist=True) | join('\n') }}"
     state: present
-    exclusive: true
+    exclusive: false
 
 - name: Disallow SSH password authentication
   become: true

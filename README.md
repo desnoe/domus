@@ -117,7 +117,7 @@ Inspects base system identity/uptime, locales/keyboard, time/NTP sync, SSH daemo
 # Full health report
 uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml
 
-# Scoped report using tags (base, locales, ntp, sshd, ufw, crypto, snapshot, rclone)
+# Scoped report using tags (base, locales, ntp, sshd, ufw, crypto, snapshot, rclone, runner)
 uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags crypto
 ```
 
@@ -126,16 +126,18 @@ uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --t
 ## 📚 Documentation & Guidelines
 
 - **[Detailed Ansible Architecture & Roles Guide](docs/ansible.md)**: Deep dive into all playbooks, roles, and storage layout.
+- **[GitHub Actions CI/CD & Self-Hosted Runner Setup Guide](docs/github-ci-runner-setup.md)**: Step-by-step setup for the two-stage pipeline, `local-runner` approval gate, and `runner.delarche.fr` VM provisioning.
 - **[Test Book & Non-Regression Verification Guide](docs/testing.md)**: Complete catalog of QA, system, firewall, storage, backup, and chaos test cases (`TC-*`).
 - **[Disaster Recovery & Storage Operations Guide](docs/disaster-recovery.md)**: Step-by-step procedures for emergency recovery, file restoration, and LUKS header repair.
 - **[AI Agent & Contributor Guidelines](AGENTS.md)**: Language policy (mandatory English), coding standards, and pre-commit rules.
 
 ---
 
-## 🛠️ Utility Scripts (`scripts/`)
+## 🛠️ Utility & Test Scripts (`scripts/`)
 
-The repository includes helper shell utilities for batch image processing via ImageMagick (`magick`):
+The repository includes a lab integration test runner and helper shell utilities for batch image processing via ImageMagick (`magick`):
 
+- **[`scripts/test-lab.sh`](scripts/test-lab.sh)**: Modular non-regression test runner targeting `debian.delarche.fr` (`check-prereqs`, `system-and-ufw`, `storage-wipe-and-unlock`, `backup-and-sync`, `corner-cases-and-raid1`, `status`, `all`).
 - **[`scripts/image-convert.sh`](scripts/image-convert.sh)**: Parameterized CLI supporting A4 canvas centering (`--a4`), directory placement (`--alongside`), and quality adjustments.
 - **[`scripts/png2jpg.sh`](scripts/png2jpg.sh)**: Converts PNG images to optimized JPEG.
 - **[`scripts/png2jpga4.sh`](scripts/png2jpga4.sh)**: Centers PNG images onto a 300 DPI A4 white canvas.

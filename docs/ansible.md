@@ -76,12 +76,12 @@ flowchart TD
 Ansible configurations are partitioned under `ansible/envs/`:
 
 - **`ansible/envs/lab/`**: Testing and development environment.
-  - Hosts: `debian.delarche.fr`
+  - Hosts: `debian.delarche.fr` (`[crypto]`)
 - **`ansible/envs/live/`**: Production home infrastructure.
-  - Hosts: `kodlix.delarche.fr`, `zotac.delarche.fr`
+  - Hosts: `kodlix.delarche.fr`, `zotac.delarche.fr` (`[crypto]`), `runner.delarche.fr` (`[runner]`)
 
 Each environment contains:
-- `inventory.ini`: Host declarations and group assignments (`crypto`).
+- `inventory.ini`: Host declarations and group assignments (`crypto`, `runner`).
 - `group_vars/all/main.yml`: Global variables common to all hosts in this environment.
 - `host_vars/<hostname>/main.yml`: Public host-specific variables.
 - `host_vars/<hostname>/vault.yml`: Encrypted secrets for the host.
@@ -182,9 +182,9 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   *(The `-K` flag interactively prompts for the `become` password in your terminal; passwords are never saved to disk or git).*
 
 ### 2. `ansible/system.yml`
-- **Purpose**: System-wide baseline configuration, package management, security hardening, and service management. Completely decoupled from storage management.
-- **Target hosts**: `hosts: all`
-- **Roles executed**: `apt`, `base`, `htop`, `locales`, `ntp`, `sshd`, `sudo`, `ufw`, `vim`.
+- **Purpose**: System-wide baseline configuration, package management, security hardening, service management, and GitHub Actions self-hosted runner provisioning/upgrades. Completely decoupled from storage management.
+- **Target hosts**: Play 1 on `hosts: all`; Play 2 on `hosts: runner`
+- **Roles executed**: `apt`, `base`, `htop`, `locales`, `ntp`, `sshd`, `sudo`, `ufw`, `vim` (on `all`), and `runner` (on `runner`).
 - **Usage**:
   ```bash
   uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml
@@ -234,8 +234,8 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   ```
 
 ### 7. `ansible/status.yml`
-- **Purpose**: Non-destructive, read-only diagnostic playbook reporting base host identity/uptime, locales/keyboard layout, time/NTP synchronization, SSH daemon settings and authorized key fingerprints, UFW firewall status, LUKS container status, header backups, SMART health, Btrfs usage and error stats, `btrfs-snapshot-*` / `rclone-sync-*` systemd timers, `journald` logs, and `rclone` remote configuration status.
-- **Roles executed**: Modularly imports status tasks from `base`, `locales`, `ntp`, `sshd`, `ufw`, `crypto`, `snapshot`, and `rclone` roles.
+- **Purpose**: Non-destructive, read-only diagnostic playbook reporting base host identity/uptime, locales/keyboard layout, time/NTP synchronization, SSH daemon settings and authorized key fingerprints, UFW firewall status, LUKS container status, header backups, SMART health, Btrfs usage and error stats, `btrfs-snapshot-*` / `rclone-sync-*` systemd timers, `journald` logs, `rclone` remote configuration status, and GitHub Actions self-hosted runner health.
+- **Roles executed**: Modularly imports status tasks from `base`, `locales`, `ntp`, `sshd`, `ufw` (`hosts: all`), `crypto`, `snapshot`, `rclone` (`hosts: crypto`), and `runner` (`hosts: runner`).
 - **Usage**:
   ```bash
   # Full health report
@@ -250,12 +250,14 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags crypto
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags snapshot
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags rclone
+  uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/status.yml --limit runner.delarche.fr --tags runner
   ```
 
 ---
 
-## 🚑 Disaster Recovery & Verification Guides
+## 🚑 Disaster Recovery, CI/CD & Verification Guides
 
+- 👉 **[GitHub Actions CI/CD & Self-Hosted Runner Setup Guide](github-ci-runner-setup.md)**: Two-stage pipeline architecture, `local-runner` protection gate, and `runner.delarche.fr` setup.
 - 👉 **[Disaster Recovery & Storage Operations Guide](disaster-recovery.md)**: Manual unlock without Ansible, snapshot restoration, and LUKS header restoration from `/var/backups/luks/`.
 - 👉 **[Test Book & Non-Regression Verification Guide](testing.md)**: Full catalog of test cards (`TC-QA`, `TC-SYS`, `TC-FW`, `TC-STO`, `TC-BAK`, `TC-ADV`) and master non-regression runbook.
 
@@ -272,8 +274,9 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 | **`locales`** | Generates `en_US.UTF-8` and `fr_FR.UTF-8` locales, configures English system UI (`LANG=en_US.UTF-8`) with French regional categories (`LC_TIME`, `LC_MEASUREMENT`, `LC_PAPER`, `LC_MONETARY=fr_FR.UTF-8`) in `/etc/locale.conf` (symlinked from `/etc/default/locale`), and configures French AZERTY keyboard (`fr`/`latin9`). | `/etc/locale.conf`, `/etc/default/locale`, `/etc/default/keyboard` |
 | **`ntp`** | Sets timezone (`Europe/Paris`) and configures `chrony` (`fr.pool.ntp.org`, `rtcsync`, `leapseclist`, and `leapsecmode slew` for monotonic leap seconds). | `/etc/chrony/chrony.conf`, `tzdata`, `chrony` service |
 | **`rclone`** | Installs `rclone`, copies local `~/.config/rclone/rclone.conf` (`mode: "0600"`, `no_log: true`), and deploys sandboxed `systemd` service and timer units (`rclone-sync-<slug>.{service,timer}`) invoking `/usr/bin/rclone sync` directly with kernel mount protection (`Requisite=`, `BindsTo=`, `AssertPathIsMountPoint=`) and `ProtectSystem=strict`. | `~/.config/rclone/rclone.conf`, `/etc/systemd/system/rclone-sync-*.{service,timer}` |
+| **`runner`** | Installs CI/CD and .NET runtime dependencies (`git`, `curl`, `jq`, `shellcheck`, `rsync`, `libicu-dev`, `libssl-dev`), copies local `~/.ansible_vault_pass` (`mode: "0600"`, `no_log: true`) and `~/.config/rclone/rclone.conf` (`mode: "0600"`, `no_log: true`), generates `/home/{{ ansible_user }}/.ssh/id_ed25519` on the runner, adds `debian.delarche.fr` to `known_hosts`, authorizes the runner's public key on `debian.delarche.fr`, and installs/upgrades the official GitHub Actions Runner (`actions/runner`) release in `/opt/actions-runner`. | `/opt/actions-runner`, `~/.ansible_vault_pass`, `~/.config/rclone/rclone.conf`, `~/.ssh/id_ed25519` |
 | **`snapshot`** | Manages Btrfs snapshot automation: deploys streamlined `/home/{{ ansible_user }}/bin/snapshot.sh` (30 daily + 52 weekly ISO retention) and configures sandboxed `systemd` service and timer units (`btrfs-snapshot-<name>.{service,timer}`) with dual mount binding and read-only source protection (`ProtectSystem=strict`, `ReadWritePaths={{ item.destination }}`). | `/home/{{ ansible_user }}/bin/snapshot.sh`, `/etc/systemd/system/btrfs-snapshot-*.{service,timer}` |
-| **`sshd`** | Automatically discovers all local `~/.ssh/*.pub` public keys and synchronizes them to `~/.ssh/authorized_keys` (`exclusive: true`), and hardens `/etc/ssh/sshd_config` (disables root login and password authentication, validated via `sshd -t -f %s`). | `/etc/ssh/sshd_config`, `~/.ssh/authorized_keys` |
+| **`sshd`** | Automatically discovers all local `~/.ssh/*.pub` public keys and ensures they are present in `~/.ssh/authorized_keys` (`exclusive: false`), and hardens `/etc/ssh/sshd_config` (disables root login and password authentication, validated via `sshd -t -f %s`). | `/etc/ssh/sshd_config`, `~/.ssh/authorized_keys` |
 | **`sudo`** | Creates `wheel` group, configures `/etc/sudoers.d/99-ansible-wheel` (validated via `visudo`), and configures user `{{ ansible_user }}` with wheel group membership and bash shell without managing local passwords. | `/etc/sudoers.d/99-ansible-wheel`, `/etc/passwd` |
 | **`ufw`** | Configures declarative dual-stack (IPv4/IPv6) packet filtering via `community.general.ufw` (`ufw_rules`), sets default policies (`incoming: deny`, `outgoing: allow`, `routed: deny`), cleans legacy `/etc/network/iptables.up.rules`, and enables `ufw.service` at boot. | `/etc/default/ufw`, `/etc/ufw/user.rules`, `/etc/ufw/user6.rules`, `ufw` service |
 | **`vim`** | Installs `vim`, sets `/usr/bin/vim.basic` as default system `editor`, and provisions `.vimrc` (with `defaults.vim` and disabled mouse capture) for regular user and root. | `~/.vimrc`, `/root/.vimrc`, `editor` alternative |

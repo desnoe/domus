@@ -1,6 +1,6 @@
 ---
-- name: Report system, storage, and backup status
-  hosts: crypto
+- name: Report system baseline and security status
+  hosts: all
   become: true
   gather_facts: true
 
@@ -65,6 +65,12 @@
         - ufw
         - status
 
+- name: Report storage and backup status
+  hosts: crypto
+  become: true
+  gather_facts: true
+
+  tasks:
     - name: Report storage pool status
       ansible.builtin.include_role:
         name: crypto
@@ -99,4 +105,22 @@
             - status
       tags:
         - rclone
+        - status
+
+- name: Report GitHub Actions runner status
+  hosts: runner
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Report GitHub Actions self-hosted runner status
+      ansible.builtin.include_role:
+        name: runner
+        tasks_from: status
+        apply:
+          tags:
+            - runner
+            - status
+      tags:
+        - runner
         - status

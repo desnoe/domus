@@ -1,0 +1,69 @@
+---
+- name: Query installed GitHub Actions runner version
+  ansible.builtin.command:
+    cmd: "{{ runner_install_dir }}/bin/Runner.Listener --version"
+  register: runner_status_version_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Check Ansible Vault password file on runner
+  become: true
+  ansible.builtin.stat:
+    path: "/home/{{ ansible_user }}/.ansible_vault_pass"
+  register: runner_status_vault_stat
+
+- name: Check Ed25519 SSH public key on runner
+  become: true
+  ansible.builtin.stat:
+    path: "/home/{{ ansible_user }}/.ssh/id_ed25519.pub"
+  register: runner_status_ssh_stat
+
+- name: Check GitHub Actions runner registration state
+  become: true
+  ansible.builtin.stat:
+    path: "{{ runner_install_dir }}/.runner"
+  register: runner_status_reg_stat
+
+- name: Check GitHub Actions runner systemd service file
+  become: true
+  ansible.builtin.stat:
+    path: "{{ runner_install_dir }}/.service"
+  register: runner_status_svc_stat
+
+- name: Query GitHub Actions runner systemd service status
+  when: runner_status_svc_stat.stat.exists
+  become: true
+  ansible.builtin.command:
+    cmd: ./svc.sh status
+    chdir: "{{ runner_install_dir }}"
+  register: runner_status_svc_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Query recent GitHub Actions runner journal entries
+  become: true
+  ansible.builtin.command:
+    cmd: "journalctl -u 'actions.runner.*' -n 15 --no-pager"
+  register: runner_status_journal_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Display GitHub Actions Runner Status Report
+  ansible.builtin.debug:
+    msg: |
+      =======================================================
+      GITHUB ACTIONS RUNNER REPORT: {{ inventory_hostname }}
+      =======================================================
+      Install directory: {{ runner_install_dir }}
+      Runner binary version: {{ runner_status_version_cmd.stdout | default('Not installed', true) | trim }}
+      Vault password file (~/.ansible_vault_pass): {{ runner_status_vault_stat.stat.exists }} (mode: {{ runner_status_vault_stat.stat.mode | default('N/A') }})
+      Runner SSH key (~/.ssh/id_ed25519.pub): {{ runner_status_ssh_stat.stat.exists }}
+      Registered (.runner): {{ runner_status_reg_stat.stat.exists }}
+      Service installed (.service): {{ runner_status_svc_stat.stat.exists }}
+      -------------------------------------------------------
+      Service Status:
+      {{ runner_status_svc_cmd.stdout | default('Service not configured yet (run ./config.sh && sudo ./svc.sh install).', true) }}
+      -------------------------------------------------------
+      Recent Journal Logs (actions.runner.*):
+      {{ runner_status_journal_cmd.stdout | default('No journal entries found.', true) }}
+      =======================================================

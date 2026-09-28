@@ -1,0 +1,157 @@
+---
+- name: Install GitHub Actions runner and CI dependencies
+  become: true
+  ansible.builtin.apt:
+    name: "{{ runner_packages }}"
+    state: present
+
+- name: Copy local Ansible Vault password file to runner host
+  become: true
+  ansible.builtin.copy:
+    src: "{{ lookup('ansible.builtin.env', 'HOME') }}/.ansible_vault_pass"
+    dest: "/home/{{ ansible_user }}/.ansible_vault_pass"
+    mode: "0600"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+  no_log: true
+
+- name: Ensure rclone configuration directory exists on runner
+  become: true
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/.config/rclone"
+    state: directory
+    mode: "0700"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+
+- name: Copy local rclone.conf to runner host
+  become: true
+  ansible.builtin.copy:
+    src: "{{ lookup('ansible.builtin.env', 'HOME') }}/.config/rclone/rclone.conf"
+    dest: "/home/{{ ansible_user }}/.config/rclone/rclone.conf"
+    mode: "0600"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+  no_log: true
+
+- name: Ensure SSH directory exists on runner host
+  become: true
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/.ssh"
+    state: directory
+    mode: "0700"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+
+- name: Generate Ed25519 SSH keypair on runner host
+  become: true
+  community.crypto.openssh_keypair:
+    path: "/home/{{ ansible_user }}/.ssh/id_ed25519"
+    type: ed25519
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+  register: runner_ssh_keypair
+
+- name: Scan lab host SSH public key from runner host
+  ansible.builtin.command:
+    cmd: "ssh-keyscan -T 5 {{ runner_lab_host }}"
+  register: runner_lab_keyscan
+  changed_when: false
+
+- name: Trust lab host SSH key in runner known_hosts
+  become: true
+  ansible.builtin.known_hosts:
+    path: "/home/{{ ansible_user }}/.ssh/known_hosts"
+    name: "{{ runner_lab_host }}"
+    key: "{{ item }}"
+    state: present
+  loop: "{{ runner_lab_keyscan.stdout_lines | reject('match', '^#') | list }}"
+
+- name: Ensure runner known_hosts ownership and permissions
+  become: true
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/.ssh/known_hosts"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+
+- name: Authorize runner SSH public key on lab host
+  become: true
+  delegate_to: "{{ runner_lab_host }}"
+  ansible.posix.authorized_key:
+    user: "{{ ansible_user }}"
+    key: "{{ runner_ssh_keypair.public_key }}"
+    state: present
+    exclusive: false
+
+- name: Ensure GitHub Actions runner directory exists
+  become: true
+  ansible.builtin.file:
+    path: "{{ runner_install_dir }}"
+    state: directory
+    mode: "0755"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+
+- name: Check whether GitHub Actions runner systemd service is configured
+  become: true
+  ansible.builtin.stat:
+    path: "{{ runner_install_dir }}/.service"
+  register: runner_service_stat
+
+- name: Query installed GitHub Actions runner version
+  ansible.builtin.command:
+    cmd: "{{ runner_install_dir }}/bin/Runner.Listener --version"
+  register: runner_installed_version
+  changed_when: false
+  failed_when: false
+
+- name: Query latest upstream GitHub Actions runner release
+  ansible.builtin.uri:
+    url: https://api.github.com/repos/actions/runner/releases/latest
+    return_content: true
+  register: runner_upstream_release
+  changed_when: false
+
+- name: Determine target GitHub Actions runner version and update state
+  ansible.builtin.set_fact:
+    runner_target_version: "{{ runner_upstream_release.json.tag_name | regex_replace('^v', '') }}"
+    runner_needs_update: >-
+      {{
+        (runner_installed_version.rc != 0) or
+        ((runner_installed_version.stdout | default('') | trim) != (runner_upstream_release.json.tag_name | regex_replace('^v', '')))
+      }}
+
+- name: Stop active GitHub Actions runner service before upgrade
+  when:
+    - runner_needs_update | bool
+    - runner_service_stat.stat.exists
+  become: true
+  ansible.builtin.command:
+    cmd: ./svc.sh stop
+    chdir: "{{ runner_install_dir }}"
+  changed_when: true
+
+- name: Download and extract official GitHub Actions runner release
+  when: runner_needs_update | bool
+  become: true
+  ansible.builtin.unarchive:
+    src: >-
+      https://github.com/actions/runner/releases/download/v{{ runner_target_version }}/actions-runner-linux-{{
+      'arm64' if ansible_architecture == 'aarch64' else 'x64'
+      }}-{{ runner_target_version }}.tar.gz
+    dest: "{{ runner_install_dir }}"
+    remote_src: true
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+
+- name: Start GitHub Actions runner service after upgrade
+  when:
+    - runner_needs_update | bool
+    - runner_service_stat.stat.exists
+  become: true
+  ansible.builtin.command:
+    cmd: ./svc.sh start
+    chdir: "{{ runner_install_dir }}"
+  changed_when: true

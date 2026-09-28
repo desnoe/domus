@@ -12,3 +12,9 @@
     - sudo
     - ufw
     - vim
+
+- name: Configure GitHub Actions self-hosted runner
+  hosts: runner
+  become: true
+  roles:
+    - runner

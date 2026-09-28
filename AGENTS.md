@@ -59,18 +59,18 @@
 
 Playbooks are strictly separated by operational responsibility (no role duplication):
 1. `ansible/bootstrap.yml`: Day-0 SSH key & passwordless sudo setup (`apt`, `sudo`, `sshd`), chaining `ansible/system.yml`.
-2. `ansible/system.yml`: OS baseline, packages, firewall (`ufw`), time sync (`ntp`), and hardening (`hosts: all`).
+2. `ansible/system.yml`: OS baseline, packages, firewall (`ufw`), time sync (`ntp`), and hardening (`hosts: all`), plus GitHub Actions self-hosted runner provisioning/upgrades via the `runner` role (`hosts: runner`).
 3. `ansible/storage-unlock.yml`: Non-destructive post-reboot LUKS unlock, `btrfs device scan`, and subvolume mounting (`hosts: crypto`).
 4. `ansible/storage-wipe-and-reset.yml`: Destructive storage reset with interactive `WIPE` confirmation (`hosts: crypto`).
 5. `ansible/storage-replace.yml`: Guided Btrfs RAID1 member disk replacement (`hosts: crypto`), supporting auto-detection of unformatted/closed disks across multiple pools or targeted replacement via `-e replace_pool=<pool> -e replace_index=<idx>`.
 6. `ansible/backup.yml`: Deploys `snapshot` and `rclone` `systemd.service` and `systemd.timer` units (`hosts: crypto`).
-7. `ansible/status.yml`: Read-only health reporting across `base`, `locales`, `ntp`, `sshd`, `ufw`, `crypto`, `snapshot`, and `rclone` roles (supports `--tags base|locales|ntp|sshd|ufw|crypto|snapshot|rclone`).
+7. `ansible/status.yml`: Read-only health reporting across `base`, `locales`, `ntp`, `sshd`, `ufw` (`hosts: all`), `crypto`, `snapshot`, `rclone` (`hosts: crypto`), and `runner` (`hosts: runner`) roles (supports `--tags base|locales|ntp|sshd|ufw|crypto|snapshot|rclone|runner`).
 
 ---
 
-## 🧪 Mandatory Non-Regression Verification Protocol (Lab)
+## 🧪 Mandatory Non-Regression Verification Protocol (Lab & CI/CD)
 
-Whenever modifying storage (`crypto`), backup (`snapshot`, `rclone`), or system/firewall (`ufw`) roles/playbooks, agents MUST execute a full multi-order non-regression test campaign against `ansible/envs/lab/inventory.ini` (`debian.delarche.fr`):
+Whenever modifying storage (`crypto`), backup (`snapshot`, `rclone`), or system/firewall (`ufw`) roles/playbooks, agents MUST execute a full multi-order non-regression test campaign against `ansible/envs/lab/inventory.ini` (`debian.delarche.fr`) (automated via [`scripts/test-lab.sh`](scripts/test-lab.sh) and [`.github/workflows/ci.yml`](.github/workflows/ci.yml)):
 1. **Idempotence & Baseline Chaining**: Run `system.yml` (twice, verifying `changed=0` on second run), `bootstrap.yml`, and `status.yml`.
 2. **Firewall (`ufw`) 3-Step Non-Regression Verification**:
    - **Service & Dual-Stack Kernel State**: Verify `ufw status verbose`, `systemctl is-enabled ufw`, and live netfilter rules (`iptables -S ufw-user-input` and `ip6tables -S ufw6-user-input`).
@@ -79,4 +79,4 @@ Whenever modifying storage (`crypto`), backup (`snapshot`, `rclone`), or system/
 3. **Wipe, Unlock & Backup Interleaving**: Run `storage-wipe-and-reset.yml -e confirm_wipe=yes` $\rightarrow$ `storage-unlock.yml` (verify `changed=0`) $\rightarrow$ `backup.yml` (twice, plus triggering `rclone-sync-onedrive-share-50ans.service` and `btrfs-snapshot-data.service`) $\rightarrow$ `status.yml`.
 4. **Simulated Reboot / Lock Cycle**: Unmount all Btrfs subvolumes and close all LUKS mappers on the lab host, run `status.yml` (locked state), then run `storage-unlock.yml` and verify all subvolumes, test files, and snapshots are intact.
 5. **Sequential Disk-by-Disk RAID1 Replacement**: Test `storage-replace.yml` sequentially on each member index (`0`, `1`, ...) of every pool (covering both active online replacement via `-e replace_pool=<pool> -e replace_index=<idx>` and auto-detected replacement of a wiped/closed disk), verifying zero data loss and clean `status.yml` / `storage-unlock.yml` execution after each replacement.
-6. **Full Test Book Reference ([`docs/testing.md`](docs/testing.md))**: Consult and maintain [`docs/testing.md`](docs/testing.md) (`TC-QA`, `TC-SYS`, `TC-FW`, `TC-STO`, `TC-BAK`, and advanced corner-case sequences `TC-ADV-01..06`) whenever adding or modifying infrastructure features.
+6. **Full Test Book & CI Reference ([`docs/testing.md`](docs/testing.md) & [`docs/github-ci-runner-setup.md`](docs/github-ci-runner-setup.md))**: Consult and maintain [`docs/testing.md`](docs/testing.md) (`TC-QA`, `TC-SYS`, `TC-FW`, `TC-STO`, `TC-BAK`, and advanced corner-case sequences `TC-ADV-01..06`), [`scripts/test-lab.sh`](scripts/test-lab.sh), and [`docs/github-ci-runner-setup.md`](docs/github-ci-runner-setup.md) whenever adding or modifying infrastructure features.

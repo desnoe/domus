@@ -1,0 +1,15 @@
+---
+runner_install_dir: /opt/actions-runner
+runner_lab_host: debian.delarche.fr
+runner_packages:
+  - ca-certificates
+  - curl
+  - git
+  - jq
+  - libicu-dev
+  - libkrb5-3
+  - libssl-dev
+  - rsync
+  - shellcheck
+  - tar
+  - zlib1g
