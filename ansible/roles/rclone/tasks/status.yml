@@ -7,14 +7,12 @@
   failed_when: false
 
 - name: Check rclone configuration file status
-  become: true
   ansible.builtin.stat:
     path: "/home/{{ ansible_user }}/.config/rclone/rclone.conf"
   register: rclone_conf_stat
 
 - name: Query configured rclone remotes
   when: rclone_conf_stat.stat.exists and rclone_conf_stat.stat.size > 0
-  become: true
   ansible.builtin.command:
     cmd: "rclone listremotes --config /home/{{ ansible_user }}/.config/rclone/rclone.conf"
   register: rclone_remotes_cmd
@@ -22,7 +20,6 @@
   failed_when: false
 
 - name: Query rclone systemd timers  # noqa: command-instead-of-module
-  become: true
   ansible.builtin.command:
     cmd: "systemctl list-timers --all --no-pager 'rclone-sync-*'"
   register: rclone_timers_cmd
@@ -30,7 +27,6 @@
   failed_when: false
 
 - name: Query recent rclone systemd journal entries
-  become: true
   ansible.builtin.command:
     cmd: "journalctl -u 'rclone-sync-*.service' -n 15 --no-pager"
   register: rclone_journal_cmd

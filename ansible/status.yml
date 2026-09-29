@@ -68,7 +68,7 @@
 - name: Report storage and backup status
   hosts: crypto
   become: true
-  gather_facts: true
+  gather_facts: false
 
   tasks:
     - name: Report storage pool status
@@ -110,7 +110,7 @@
 - name: Report GitHub Actions runner status
   hosts: runner
   become: true
-  gather_facts: true
+  gather_facts: false
 
   tasks:
     - name: Report GitHub Actions self-hosted runner status

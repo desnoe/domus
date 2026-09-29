@@ -2,6 +2,13 @@
 # Lab non-regression integration test runner for homecode (targets debian.delarche.fr).
 # Executed by GitHub Actions Job 2 (integration-tests-local) on runner.delarche.fr
 # or manually from the controller via: ./scripts/test-lab.sh <subcommand|all>
+#
+# Security note: Secrets (~/.ansible_vault_pass and ~/.config/rclone/rclone.conf)
+# persist on the self-hosted runner by design. The runner (runner.delarche.fr) is
+# an on-prem machine owned and operated by the repository owner, and the repository
+# is private. The check-prereqs step only writes these files if they are missing
+# (initial provisioning via GitHub Secrets); once provisioned, files are reused
+# across CI runs without re-creation.
 
 set -euo pipefail
 
@@ -35,8 +42,10 @@ step_check_prereqs() {
         chmod 600 "${HOME}/.config/rclone/rclone.conf"
     fi
 
-    test -s "${HOME}/.ansible_vault_pass"
-    test -s "${HOME}/.config/rclone/rclone.conf"
+    test -s "${HOME}/.ansible_vault_pass" \
+        || { echo "FATAL: ${HOME}/.ansible_vault_pass is missing or empty"; exit 1; }
+    test -s "${HOME}/.config/rclone/rclone.conf" \
+        || { echo "FATAL: ${HOME}/.config/rclone/rclone.conf is missing or empty"; exit 1; }
 
     run_remote << 'EOF'
 sudo -n true

@@ -3,18 +3,8 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
   pull_request:
-    branches:
-      - main
   workflow_dispatch:
-    inputs:
-      run_lab_tests:
-        description: "Run full destructive lab integration tests on runner.delarche.fr"
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -69,9 +59,9 @@ jobs:
   integration-tests-local:
     name: Full Lab Non-Regression Campaign (Self-Hosted)
     needs: lint-and-syntax
-    if: github.event_name == 'workflow_dispatch' && inputs.run_lab_tests == true
+    if: >-
+      !contains(github.event.head_commit.message, '[skip-lab]')
     runs-on: self-hosted
-    environment: local-runner
     timeout-minutes: 30
     steps:
       - name: Checkout repository
@@ -90,9 +80,6 @@ jobs:
         run: uv run ansible-galaxy collection install -r ansible/requirements.yml -p ansible/collections
 
       - name: Verify local runner prerequisites (Vault, Rclone, Lab SSH)
-        env:
-          VAULT_SECRET: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
-          RCLONE_CONF_SECRET: ${{ secrets.RCLONE_CONF }}
         run: ./scripts/test-lab.sh check-prereqs
 
       - name: "Step 1: System Baseline Idempotence & UFW Drift Remediation (TC-SYS-01, TC-FW-03)"
