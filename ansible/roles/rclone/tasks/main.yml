@@ -17,12 +17,10 @@
   when: >-
     rclone_installed_version.rc != 0 or
     (rclone_installed_version.stdout_lines | first | default('')) != (rclone_upstream_version.content | trim)
-  become: true
   ansible.builtin.apt:
     deb: "https://downloads.rclone.org/rclone-current-linux-{{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}.deb"
 
 - name: Ensure rclone configuration directory exists
-  become: true
   ansible.builtin.file:
     path: "/home/{{ ansible_user }}/.config/rclone"
     state: directory
@@ -31,7 +29,6 @@
     group: "{{ ansible_user }}"
 
 - name: Copy local rclone.conf to remote host
-  become: true
   ansible.builtin.copy:
     src: "{{ lookup('ansible.builtin.env', 'HOME') }}/.config/rclone/rclone.conf"
     dest: "/home/{{ ansible_user }}/.config/rclone/rclone.conf"
@@ -41,7 +38,6 @@
   no_log: true
 
 - name: "Deploy rclone systemd service unit: {{ item.provider }}"
-  become: true
   ansible.builtin.template:
     src: rclone-sync.service.j2
     dest: >-
@@ -58,7 +54,6 @@
     label: "{{ item.provider }}:{{ item.bucket | default('') }}"
 
 - name: "Deploy rclone systemd timer unit: {{ item.provider }}"
-  become: true
   ansible.builtin.template:
     src: rclone-sync.timer.j2
     dest: >-
@@ -75,7 +70,6 @@
     label: "{{ item.provider }}:{{ item.bucket | default('') }}"
 
 - name: "Enable and start rclone systemd timer: {{ item.provider }}"
-  become: true
   ansible.builtin.systemd_service:
     name: >-
       rclone-sync-{{

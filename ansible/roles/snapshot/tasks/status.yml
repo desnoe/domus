@@ -1,7 +1,6 @@
 ---
 - name: Query Btrfs snapshot systemd timers  # noqa: command-instead-of-module
   when: (snapshot_jobs | default([])) | length > 0
-  become: true
   ansible.builtin.command:
     cmd: "systemctl list-timers --all --no-pager 'btrfs-snapshot-*'"
   register: snapshot_timers_cmd
@@ -10,7 +9,6 @@
 
 - name: Query recent Btrfs snapshot journal entries
   when: (snapshot_jobs | default([])) | length > 0
-  become: true
   ansible.builtin.command:
     cmd: "journalctl -u 'btrfs-snapshot-*.service' -n 15 --no-pager"
   register: snapshot_journal_cmd

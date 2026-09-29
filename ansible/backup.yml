@@ -1,6 +1,7 @@
 ---
 - name: Configure snapshot and cloud backup services
   hosts: crypto
+  become: true
   roles:
     - snapshot
     - rclone

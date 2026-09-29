@@ -1,6 +1,5 @@
 ---
 - name: Ensure bin directory exists
-  become: true
   ansible.builtin.file:
     path: "/home/{{ snapshot_user }}/bin"
     state: directory
@@ -10,7 +9,6 @@
 
 - name: Copy Btrfs snapshot script
   when: ansible_distribution in ['Debian', 'Ubuntu']
-  become: true
   ansible.builtin.copy:
     src: "snapshot.sh"
     dest: "/home/{{ snapshot_user }}/bin/snapshot.sh"
@@ -19,7 +17,6 @@
     group: "{{ snapshot_user }}"
 
 - name: "Deploy Btrfs snapshot systemd service unit: {{ item.name }}"
-  become: true
   ansible.builtin.template:
     src: btrfs-snapshot.service.j2
     dest: >-
@@ -34,7 +31,6 @@
     label: "{{ item.name }}"
 
 - name: "Deploy Btrfs snapshot systemd timer unit: {{ item.name }}"
-  become: true
   ansible.builtin.template:
     src: btrfs-snapshot.timer.j2
     dest: >-
@@ -49,7 +45,6 @@
     label: "{{ item.name }}"
 
 - name: "Enable and start Btrfs snapshot systemd timer: {{ item.name }}"
-  become: true
   ansible.builtin.systemd_service:
     name: >-
       btrfs-snapshot-{{
