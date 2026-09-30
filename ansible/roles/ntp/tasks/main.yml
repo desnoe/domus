@@ -35,3 +35,9 @@
     name: chrony
     state: started
     enabled: true
+
+- name: Force immediate clock sync
+  become: true
+  ansible.builtin.command:
+    cmd: chronyc makestep
+  changed_when: false
