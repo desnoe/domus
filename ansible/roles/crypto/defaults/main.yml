@@ -1,7 +1,7 @@
 ---
 crypto_wipe: false
 
-crypto_btrfs_default_mount_options: "nofail,compress=zstd:3,noatime,user_subvol_rm_allowed"
+crypto_btrfs_default_mount_options: "defaults,nofail,compress=zstd:1,noatime,user_subvol_rm_allowed"
 
 
 # Declarative list of encrypted block devices or RAID pools to manage on the host.
