@@ -36,10 +36,10 @@ flowchart TD
    - Btrfs pools are initialized with filesystem label `-L {{ disk_name }}`.
    - `btrfs device scan` registers all opened member mappers with the kernel.
    - Subvolumes are mounted in `/etc/fstab` using `src: "LABEL={{ disk_name }}"` (e.g. `LABEL=data`), guaranteeing clean pool assembly regardless of device enumeration order.
-   - Each entry in `subvolumes` is an explicit absolute mount path (e.g. `/home/{{ ansible_user }}/data/sync`). Its internal Btrfs subvolume name is deterministically derived by flattening slashes into underscores (`home_olivier_data_sync`) and mounted with options `noauto,nofail,compress=zstd:3,noatime,user_subvol_rm_allowed,subvol=<flattened_name>`.
+   - Each entry in `subvolumes` is an explicit absolute mount path (e.g. `/home/{{ ansible_user }}/data/sync`). Its internal Btrfs subvolume name is deterministically derived by flattening slashes into underscores (`home_olivier_data_sync`) and mounted with options `noauto,nofail,compress=zstd:1,noatime,user_subvol_rm_allowed,subvol=<flattened_name>`.
    - `noauto,nofail`: Ensures the host boots reliably without emergency shell drops before encrypted LUKS containers are unlocked.
    - `user_subvol_rm_allowed`: Enables snapshot rotation by `ansible_user` without root elevation.
-   - `compress=zstd:3`: Transparent filesystem-level compression reducing flash wear and disk space usage.
+   - `compress=zstd:1`: Transparent filesystem-level compression reducing flash wear and disk space usage.
    - `noatime`: Eliminates metadata write overhead on read operations.
 
 4. **Systemd Backup Services & Timers (`rclone-sync-*` & `btrfs-snapshot-*`)**:

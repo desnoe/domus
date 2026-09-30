@@ -35,6 +35,10 @@ ExecStart=/usr/bin/rclone sync \
     --stats 1m \
     --modify-window 1s \
     --user-agent "ISV|rclone.org|rclone/v1.67.0" \
+    --transfers 2 \
+    --checkers 4 \
+    --buffer-size 32M \
+    --fast-list \
     --delete-during \
     --create-empty-src-dirs \
     --delete-excluded \

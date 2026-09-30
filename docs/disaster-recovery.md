@@ -52,10 +52,10 @@ Mount by label (`LABEL=data`) so Btrfs automatically mounts the complete pool (i
 sudo mkdir -p /mnt/recovery/data/sync /mnt/recovery/data/snapshots
 
 # Mount the sync working tree
-sudo mount -t btrfs -o subvol=home_olivier_data_sync,compress=zstd:3,noatime LABEL=data /mnt/recovery/data/sync
+sudo mount -t btrfs -o subvol=home_olivier_data_sync,compress=zstd:1,noatime LABEL=data /mnt/recovery/data/sync
 
 # Mount the snapshots tree
-sudo mount -t btrfs -o subvol=home_olivier_data_snapshots,compress=zstd:3,noatime LABEL=data /mnt/recovery/data/snapshots
+sudo mount -t btrfs -o subvol=home_olivier_data_snapshots,compress=zstd:1,noatime LABEL=data /mnt/recovery/data/snapshots
 ```
 
 ### 4. Unmount and close after operations
