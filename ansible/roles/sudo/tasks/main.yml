@@ -17,7 +17,6 @@
 
 - name: "Configure wheel group membership for user: {{ ansible_user }}"
   become: true
-
   ansible.builtin.user:
     name: "{{ ansible_user }}"
     groups:
@@ -26,3 +25,6 @@
     state: present
     createhome: true
     shell: /bin/bash
+
+- name: Reset connection to apply user group changes
+  ansible.builtin.meta: reset_connection

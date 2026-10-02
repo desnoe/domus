@@ -8,6 +8,9 @@
     - apt
     - sudo
     - sshd
+  post_tasks:
+    - name: Reset connection to apply user group and ssh changes
+      ansible.builtin.meta: reset_connection
 
 - name: Import system baseline configuration
   ansible.builtin.import_playbook: system.yml

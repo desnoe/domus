@@ -3,6 +3,7 @@
   hosts: crypto
   become: true
   gather_facts: true
+  serial: 1
 
   tasks:
     - name: Run disk replacement workflow
