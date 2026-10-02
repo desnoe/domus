@@ -1,0 +1,41 @@
+# {{ ansible_managed }}
+# Samba configuration deployed by Ansible role 'samba'
+
+[global]
+   workgroup = WORKGROUP
+   server string = {{ inventory_hostname }}
+   server min protocol = {{ samba_server_min_protocol }}
+   server signing = mandatory
+   map to guest = never
+   security = user
+   log file = /var/log/samba/log.%m
+   max log size = 1000
+   logging = file
+   panic action = /usr/share/samba/panic-action %d
+   server role = standalone server
+   obey pam restrictions = yes
+   unix password sync = no
+   pam password change = no
+   disable netbios = yes
+   smb ports = 445
+   load printers = no
+   printing = bsd
+   printcap name = /dev/null
+   disable spoolss = yes
+
+{% for share in samba_shares %}
+[{{ share.name }}]
+   comment = {{ share.comment | default('Btrfs share with Previous Versions') }}
+   path = {{ share.path }}
+   browseable = yes
+   read only = yes
+   guest ok = no
+   valid users = {{ ansible_user }}
+   vfs objects = shadow_copy2
+   shadow:snapdir = {{ share.snapdir }}
+   shadow:basedir = {{ share.path }}
+   shadow:format = %Y-%m-%d--%H-%M-%S
+   shadow:sort = desc
+   shadow:localtime = yes
+
+{% endfor %}

@@ -12,8 +12,9 @@ flowchart LR
     SYS --> FW["3. UFW Dual-Stack Firewall (TC-FW-01..03)"]
     FW --> STO["4. LUKS & Btrfs RAID1 Storage (TC-STO-01..04)"]
     STO --> BAK["5. Systemd Rclone & Snapshots (TC-BAK-01..04)"]
-    BAK --> ADV["6. Advanced Corner Cases & Chaos (TC-ADV-01..06)"]
-    ADV --> RUN["7. Master Non-Regression Checklist"]
+    BAK --> SMB["6. Samba & Shadow Copies (TC-SMB-01..07)"]
+    SMB --> ADV["7. Advanced Corner Cases & Chaos (TC-ADV-01..06)"]
+    ADV --> RUN["8. Master Non-Regression Checklist"]
 ```
 
 | Domain Prefix | Scope | Playbooks / Components Covered | Test Count |
@@ -23,6 +24,7 @@ flowchart LR
 | **`TC-FW`** | Dual-Stack Firewall (`ufw`) | `system.yml`, `ufw` role, `iptables` / `ip6tables` kernel chains | 3 |
 | **`TC-STO`** | Encrypted Storage & Btrfs RAID1 | `storage-wipe-and-reset.yml`, `storage-unlock.yml`, `storage-replace.yml`, `crypto` role | 4 |
 | **`TC-BAK`** | Cloud Sync & Btrfs Snapshots (`systemd`) | `backup.yml`, `status.yml`, `rclone` role, `snapshot` role | 4 |
+| **`TC-SMB`** | Samba File Sharing & Shadow Copies | `system.yml`, `status.yml`, `samba` role, `vfs_shadow_copy2`, `smbclient` | 6 |
 | **`TC-ADV`** | Advanced Corner Cases & Chaos Sequences | Unmounted pool guards, live unmount kill-switch, kernel sandboxing, ISO-week pruning, header recovery | 6 |
 
 ---
@@ -290,7 +292,101 @@ flowchart LR
 
 ---
 
-## 6. Advanced Corner-Case & Chaos Sequences (`TC-ADV`)
+## 6. Samba File Sharing & Shadow Copies (`TC-SMB`)
+
+### `TC-SMB-01` — Service Health & Port 445/TCP Listener
+- **Objective**: Verify that the `smbd` systemd service is active and listening exclusively on port `445/tcp` (NetBIOS port 139 disabled).
+- **Preconditions**: `ansible/system.yml --tags samba` applied.
+- **Commands**:
+  ```bash
+  ssh olivier@debian.delarche.fr "set -e
+  systemctl is-active smbd
+  ss -tlnp sport = :445 | grep -q ':445'
+  "
+  ```
+- **Expected Result**:
+  - `systemctl is-active smbd` outputs `active`.
+  - `ss -tlnp` confirms port 445 is bound by `smbd`.
+
+---
+
+### `TC-SMB-02` — Authenticated SMB3 Connection & Directory Listing
+- **Objective**: Verify that user `olivier` can authenticate against Samba using the vault-provisioned password over SMB3 and list files in the `data` share.
+- **Preconditions**: `TC-SMB-01` passed.
+- **Commands**:
+  ```bash
+  SAMBA_PASS="$(uv run ansible-vault view ansible/envs/lab/host_vars/debian.delarche.fr/vault.yml | grep '^samba_pass:' | sed 's/^samba_pass: *//' | tr -d '\"')"
+  smbclient "//debian.delarche.fr/data" -U "olivier%${SAMBA_PASS}" --max-protocol=SMB3 -c "ls"
+  ```
+- **Expected Result**:
+  - `smbclient` connects successfully without prompt.
+  - Returns directory listing including `.`, `..`, and existing synchronized files.
+
+---
+
+### `TC-SMB-03` — Shadow Copies Configuration & Snapshot Integration
+- **Objective**: Verify that `vfs_shadow_copy2` is loaded, configured with `shadow:format = %Y-%m-%d--%H-%M-%S`, and maps snapshots on disk to SMB shadow copies.
+- **Preconditions**: `TC-BAK-03` completed (at least one snapshot exists in `/home/olivier/data/snapshots`).
+- **Commands**:
+  ```bash
+  ssh olivier@debian.delarche.fr "set -e
+  testparm -s 2>/dev/null | grep -q 'vfs objects = shadow_copy2'
+  testparm -s 2>/dev/null | grep -q 'shadow:format = %Y-%m-%d--%H-%M-%S'
+  count=\"\$(find /home/olivier/data/snapshots -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')\"
+  test \"\${count}\" -ge 1
+  "
+  ```
+- **Expected Result**:
+  - `testparm` outputs show `vfs objects = shadow_copy2` and proper format.
+  - At least one valid Btrfs snapshot exists in the destination directory.
+
+---
+
+### `TC-SMB-04` — Read-Only Share Permission Enforcement
+- **Objective**: Verify that write operations over SMB to the `data` share are strictly rejected by Samba (`read only = yes`).
+- **Preconditions**: `TC-SMB-02` passed.
+- **Commands**:
+  ```bash
+  SAMBA_PASS="$(uv run ansible-vault view ansible/envs/lab/host_vars/debian.delarche.fr/vault.yml | grep '^samba_pass:' | sed 's/^samba_pass: *//' | tr -d '\"')"
+  if smbclient "//debian.delarche.fr/data" -U "olivier%${SAMBA_PASS}" --max-protocol=SMB3 -c "put /dev/null test_write_must_fail" 2>&1; then
+      echo "ERROR: Expected write to fail on read-only share, but it succeeded" >&2
+      exit 1
+  fi
+  ```
+- **Expected Result**:
+  - `smbclient` fails with `NT_STATUS_ACCESS_DENIED` or `NT_STATUS_MEDIA_WRITE_PROTECTED`.
+
+---
+
+### `TC-SMB-06` — Role Idempotence (`system.yml --tags samba`)
+- **Objective**: Verify that running `ansible/system.yml --tags samba` on a configured host results in zero changes (`changed=0`).
+- **Preconditions**: `ansible/system.yml --tags samba` applied once.
+- **Commands**:
+  ```bash
+  ANSIBLE_HOME=/tmp/.ansible uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/system.yml --tags samba
+  ```
+- **Expected Result**:
+  - Play recap shows `changed=0`, `failed=0`.
+
+---
+
+### `TC-SMB-07` — Minimum Protocol Enforcement (`server min protocol = SMB3`)
+- **Objective**: Verify that legacy, insecure SMB dialects (such as SMB1 / `NT1`) are unconditionally rejected.
+- **Preconditions**: `TC-SMB-01` passed.
+- **Commands**:
+  ```bash
+  SAMBA_PASS="$(uv run ansible-vault view ansible/envs/lab/host_vars/debian.delarche.fr/vault.yml | grep '^samba_pass:' | sed 's/^samba_pass: *//' | tr -d '\"')"
+  if smbclient "//debian.delarche.fr/data" -U "olivier%${SAMBA_PASS}" --max-protocol=NT1 -c "ls" 2>&1; then
+      echo "ERROR: Expected NT1 connection to fail, but it succeeded" >&2
+      exit 1
+  fi
+  ```
+- **Expected Result**:
+  - Connection is rejected (`NT_STATUS_NOT_SUPPORTED` or connection reset).
+
+---
+
+## 7. Advanced Corner-Case & Chaos Sequences (`TC-ADV`)
 
 ### `TC-ADV-01` — Post-Reboot Locked/Unmounted Pool 0ms Refusal (`Requisite=` + `PartOf=`)
 - **Objective**: Simulate the daily `04:00` (`rclone`) and `05:00` (`snapshot`) systemd timers firing after an unattended reboot while LUKS/Btrfs is still locked/unmounted. Prove that `systemd` aborts both services in **0 ms** (`Dependency failed`) without hanging on `/dev/disk/by-label/data` or writing to the root `/` filesystem.
@@ -424,7 +520,7 @@ flowchart LR
 
 ---
 
-## 7. Master End-to-End Non-Regression Campaign Checklist
+## 8. Master End-to-End Non-Regression Campaign Checklist
 
 Use this ordered checklist to execute a complete validation campaign on `debian.delarche.fr`:
 
@@ -433,7 +529,8 @@ Use this ordered checklist to execute a complete validation campaign on `debian.
 - [ ] **Step 3 — Dual-Stack Firewall (`ufw`)**: Run `TC-FW-01` (netfilter rules), `TC-FW-02` (live port 9999 probe), and `TC-FW-03` (`ufw disable` remediation).
 - [ ] **Step 4 — Storage Wipe, Unlock & Reboot Cycle**: Run `TC-STO-01` (`storage-wipe-and-reset.yml`), `TC-STO-02` (`storage-unlock.yml` idempotence), and `TC-STO-03` (full lock/unlock cycle).
 - [ ] **Step 5 — Cloud Sync & Btrfs Snapshots (`systemd`)**: Run `TC-BAK-01` (`backup.yml` twice), `TC-BAK-02` (`OneDrive:/Share/50ans` sync), `TC-BAK-03` (`btrfs-snapshot-data.service`), and `TC-BAK-04` (`status.yml`).
-- [ ] **Step 6 — Advanced Corner Cases & Chaos**: Run `TC-ADV-01` (unmounted 0ms refusal), `TC-ADV-02` (`PartOf=` unmount kill-switch), `TC-ADV-03` (EROFS sandbox probe), `TC-ADV-04` (ISO-week snapshot pruning), `TC-ADV-05` (wiped disk auto-detected RAID1 rebuild + scrub), and `TC-ADV-06` (LUKS2 header corruption & restore).
+- [ ] **Step 6 — Samba File Sharing & Shadow Copies**: Run `TC-SMB-01` (service health), `TC-SMB-02` (authenticated SMB3 listing), `TC-SMB-03` (shadow copies mapping), `TC-SMB-04` (read-only rejection), `TC-SMB-06` (`system.yml --tags samba` idempotence), and `TC-SMB-07` (SMB1 rejection).
+- [ ] **Step 7 — Advanced Corner Cases & Chaos**: Run `TC-ADV-01` (unmounted 0ms refusal), `TC-ADV-02` (`PartOf=` unmount kill-switch), `TC-ADV-03` (EROFS sandbox probe), `TC-ADV-04` (ISO-week snapshot pruning), `TC-ADV-05` (wiped disk auto-detected RAID1 rebuild + scrub), and `TC-ADV-06` (LUKS2 header corruption & restore).
 
 > [!NOTE]
-> **Automated CI execution**: The full non-regression campaign (Steps 1–6) runs automatically on every commit across all branches via [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) on the self-hosted runner (`runner.delarche.fr`). To skip the destructive lab tests (e.g., for documentation-only changes), include `[skip-lab]` in the commit message. See [`docs/github-ci-runner-setup.md`](github-ci-runner-setup.md) for details.
+> **Automated CI execution**: The full non-regression campaign (Steps 1–7) runs automatically on every commit across all branches via [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) on the self-hosted runner (`runner.delarche.fr`). To skip the destructive lab tests (e.g., for documentation-only changes), include `[skip-lab]` in the commit message. See [`docs/github-ci-runner-setup.md`](github-ci-runner-setup.md) for details.

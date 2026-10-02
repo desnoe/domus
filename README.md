@@ -13,6 +13,10 @@ Infrastructure as Code (IaC) repository for provisioning, hardening, and managin
 - **Automated Backups**:
   - Daily read-only Btrfs snapshots (`btrfs-snapshot-<name>.timer` / `.service` at 05:00) bound to source and destination `.mount` units and sandboxed with read-only source protection.
   - Multi-cloud synchronization via `rclone` (`rclone-sync-<slug>.timer` / `.service` starting at 04:00) using direct `/usr/bin/rclone sync` execution, kernel mount binding, and `ProtectSystem=strict` sandboxing.
+- **File Sharing & macOS Integration**:
+  - Samba SMB3 service on encrypted storage hosts exposing Btrfs subvolumes in read-only mode with native macOS Finder "Previous Versions" snapshot navigation (`vfs_shadow_copy2`).
+  - Automated Mac backups via `rsync` over SSH into target directory `/home/olivier/data/sync/mac/`.
+  - UFW firewall packet filtering restricting SMB (port 445/tcp) strictly to the local LAN subnet (`192.168.1.0/24`).
 - **System Hardening**: Baseline configuration covering `ufw` firewall (dual-stack IPv4/IPv6), SSH keys, locales, NTP, and administration tools.
 
 ---
@@ -52,12 +56,13 @@ The repository uses a clear variable precedence structure:
 | Variable Type | Location | Purpose | Examples |
 | :--- | :--- | :--- | :--- |
 | **Global Defaults** | `ansible/envs/<env>/group_vars/all/main.yml` | Common across all hosts | `ansible_user` |
-| **Host Variables** | `ansible/envs/<env>/host_vars/<host>/main.yml` | Device layout & backup targets | `crypto_disks`, `snapshot_jobs`, `rclone_jobs` |
-| **Encrypted Secrets** | `ansible/envs/<env>/host_vars/<host>/vault.yml` | Storage decryption passphrases | `luks_pass` |
+| **Host Variables** | `ansible/envs/<env>/host_vars/<host>/main.yml` | Device layout & backup targets | `crypto_disks`, `snapshot_jobs`, `rclone_jobs`, `samba_shares` |
+| **Encrypted Secrets** | `ansible/envs/<env>/host_vars/<host>/vault.yml` | Storage passphrases & credentials | `luks_pass`, `samba_pass` |
 
 
 ### User Authentication & Storage Passphrases
 - **Storage Passphrase (`luks_pass`)**: The decryption passphrase for LUKS block devices is encrypted in each host's **`ansible/envs/<env>/host_vars/<host>/vault.yml`** and consumed by the **`crypto`** role. An unencrypted reference template is provided in [`ansible/vault.yml.example`](ansible/vault.yml.example).
+- **Samba User Credentials (`samba_pass`)**: Password for accessing Samba network shares over SMB3 from macOS Finder, encrypted in **`vault.yml`** and provisioned via `smbpasswd`.
 - **User Login & Sudo**: Human user passwords are set during the initial Debian OS installation and are **never stored or managed in version control**. Ansible manages authorized SSH keys (`sshd` role) and passwordless sudo privileges via `/etc/sudoers.d/99-ansible-wheel` (`sudo` role).
 
 To view or edit secrets:
@@ -81,10 +86,14 @@ Configures initial administrative access (SSH keys, passwordless sudo via `wheel
 uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/bootstrap.yml -K
 ```
 
-### 2. Configure System Baseline (OS & Security)
-Applies package updates, base tools, firewall (`ufw`), time sync (`chrony`/`ntp`), user configuration, and SSH hardening without touching storage:
+### 2. Configure System Baseline & Services (OS, Security, Runner & Samba)
+Applies package updates, base tools, firewall (`ufw`), time sync (`chrony`/`ntp`), user configuration, SSH hardening, GitHub Actions runner provisioning, and Samba file sharing (`samba` role on `crypto` hosts):
 ```bash
+# Full system run
 uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml
+
+# Scoped run targeting Samba only
+uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml --tags samba
 ```
 
 ### 3. Unlock Storage After Server Reboot
@@ -112,22 +121,23 @@ uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/backup.yml
 ```
 
 ### 7. Check Storage and System Health (Read-Only)
-Inspects base system identity/uptime, locales/keyboard, time/NTP sync, SSH daemon/authorized keys, UFW firewall status, LUKS encryption status, header backup presence, SMART health, Btrfs usage/error stats, `btrfs-snapshot-*` / `rclone-sync-*` systemd timers, `journald` logs, and `rclone` remote configuration status:
+Inspects base system identity/uptime, locales/keyboard, time/NTP sync, SSH daemon/authorized keys, UFW firewall status, LUKS encryption status, header backup presence, SMART health, Btrfs usage/error stats, `btrfs-snapshot-*` / `rclone-sync-*` systemd timers, `journald` logs, `rclone` remote configuration status, and Samba file sharing status:
 ```bash
 # Full health report
 uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml
 
-# Scoped report using tags (base, locales, ntp, sshd, ufw, crypto, snapshot, rclone, runner)
-uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags crypto
+# Scoped report using tags (base, locales, ntp, sshd, ufw, crypto, snapshot, rclone, samba, runner)
+uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags crypto,samba
 ```
 
 ---
 
 ## 📚 Documentation & Guidelines
 
+- **[macOS User Guide: File Sharing & Snapshots](docs/mac-user-guide.md)**: Connecting from macOS Finder (SMB3), browsing historical Btrfs snapshots natively, and configuring automated `rsync` over SSH backups.
 - **[Detailed Ansible Architecture & Roles Guide](docs/ansible.md)**: Deep dive into all playbooks, roles, and storage layout.
 - **[GitHub Actions CI/CD & Self-Hosted Runner Setup Guide](docs/github-ci-runner-setup.md)**: Step-by-step setup for the two-stage pipeline, `local-runner` approval gate, and `runner.delarche.fr` VM provisioning.
-- **[Test Book & Non-Regression Verification Guide](docs/testing.md)**: Complete catalog of QA, system, firewall, storage, backup, and chaos test cases (`TC-*`).
+- **[Test Book & Non-Regression Verification Guide](docs/testing.md)**: Complete catalog of QA, system, firewall, storage, backup, Samba, and chaos test cases (`TC-*`).
 - **[Disaster Recovery & Storage Operations Guide](docs/disaster-recovery.md)**: Step-by-step procedures for emergency recovery, file restoration, and LUKS header repair.
 - **[AI Agent & Contributor Guidelines](AGENTS.md)**: Language policy (mandatory English), coding standards, and pre-commit rules.
 

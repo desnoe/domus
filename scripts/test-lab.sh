@@ -22,9 +22,10 @@ run_remote() {
 
 assert_playbook_idempotent() {
     local playbook="$1"
+    shift
     local output
 
-    output="$(uv run ansible-playbook -i "${LAB_INVENTORY}" "${playbook}")"
+    output="$(uv run ansible-playbook -i "${LAB_INVENTORY}" "${playbook}" "$@")"
     printf '%s\n' "${output}"
     printf '%s\n' "${output}" | grep -q "changed=0"
 }
@@ -82,6 +83,66 @@ count="$(rclone ls /home/olivier/data/sync/OneDrive/Share/50ans | wc -l | tr -d 
 test "${count}" -eq 8
 sudo systemctl start btrfs-snapshot-data.service
 EOF
+}
+
+step_samba() {
+    if ! command -v smbclient &>/dev/null; then
+        echo "Installing smbclient on controller..."
+        if command -v apt-get &>/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq smbclient
+        elif command -v brew &>/dev/null; then
+            brew install samba
+        else
+            echo "FATAL: smbclient not found and cannot be installed automatically" >&2
+            exit 1
+        fi
+    fi
+
+    uv run ansible-playbook -i "${LAB_INVENTORY}" ansible/system.yml --tags samba
+    assert_playbook_idempotent ansible/system.yml --tags samba
+
+    # TC-SMB-01: Service active & listening on 445/tcp
+    run_remote << 'EOF'
+systemctl is-active smbd
+ss -tlnp sport = :445 | grep -q ':445'
+EOF
+
+    local samba_pass
+    samba_pass="$(uv run ansible-vault view \
+        ansible/envs/lab/host_vars/debian.delarche.fr/vault.yml \
+        | grep '^samba_pass:' | sed 's/^samba_pass: *//' | tr -d '"')"
+
+    # TC-SMB-02: Connect and list share files
+    smbclient "//${LAB_HOST}/data" \
+        -U "${LAB_USER}%${samba_pass}" \
+        --max-protocol=SMB3 \
+        -c "ls" | grep -q '\.'
+
+    # TC-SMB-03: Shadow copies configuration & snapshot verification
+    run_remote << 'EOF'
+testparm -s 2>/dev/null | grep -q 'vfs objects = shadow_copy2'
+testparm -s 2>/dev/null | grep -q 'shadow:format = %Y-%m-%d--%H-%M-%S'
+count="$(find /home/olivier/data/snapshots -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')"
+test "${count}" -ge 1
+EOF
+
+    # TC-SMB-04: Read-only enforcement (file upload must be rejected)
+    if smbclient "//${LAB_HOST}/data" \
+        -U "${LAB_USER}%${samba_pass}" \
+        --max-protocol=SMB3 \
+        -c "put /dev/null test_write_must_fail" 2>&1; then
+        echo "ERROR: Expected write to fail on read-only share, but it succeeded" >&2
+        exit 1
+    fi
+
+    # TC-SMB-07: Minimum SMB3 protocol enforcement (NT1 / SMB1 must be rejected)
+    if smbclient "//${LAB_HOST}/data" \
+        -U "${LAB_USER}%${samba_pass}" \
+        --max-protocol=NT1 \
+        -c "ls" 2>&1; then
+        echo "ERROR: Expected NT1 connection to fail, but it succeeded" >&2
+        exit 1
+    fi
 }
 
 step_corner_cases_and_raid1() {
@@ -149,6 +210,7 @@ Subcommands:
   system-and-ufw           Verify system.yml idempotence and UFW drift remediation (TC-SYS-01, TC-FW-03)
   storage-wipe-and-unlock  Run storage-wipe-and-reset.yml and verify storage-unlock.yml idempotence (TC-STO-01..02)
   backup-and-sync          Verify backup.yml idempotence, OneDrive:/Share/50ans sync, and Btrfs snapshot (TC-BAK-01..03)
+  samba                    Deploy Samba, verify idempotence, SMB connectivity, shadow copies, and security (TC-SMB-01..07)
   corner-cases-and-raid1   Run TC-ADV-01..06 corner cases, LUKS header restore, and RAID1 disk replacement
   status                   Run full read-only health report via ansible/status.yml (TC-BAK-04)
   all                      Execute the complete non-regression campaign sequentially
@@ -171,6 +233,9 @@ main() {
         backup-and-sync)
             step_backup_and_sync
             ;;
+        samba)
+            step_samba
+            ;;
         corner-cases-and-raid1)
             step_corner_cases_and_raid1
             ;;
@@ -182,6 +247,7 @@ main() {
             step_system_and_ufw
             step_storage_wipe_and_unlock
             step_backup_and_sync
+            step_samba
             step_corner_cases_and_raid1
             step_status
             ;;

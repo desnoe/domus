@@ -22,3 +22,9 @@ rclone_jobs:
   - provider: S3
     bucket: delarche-images
     destination: "/home/{{ ansible_user }}/data/sync"
+
+samba_shares:
+  - name: data
+    path: "/home/{{ ansible_user }}/data/sync"
+    snapdir: "/home/{{ ansible_user }}/data/snapshots"
+    comment: "Btrfs data with Previous Versions"

@@ -18,3 +18,11 @@
   become: true
   roles:
     - runner
+
+- name: Configure Samba file sharing with Previous Versions
+  hosts: crypto
+  become: true
+  roles:
+    - role: samba
+      tags:
+        - samba
