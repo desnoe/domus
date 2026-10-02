@@ -1,0 +1,4 @@
+---
+samba_allowed_subnet: "192.168.1.0/24"
+samba_server_min_protocol: "SMB3"
+samba_shares: []

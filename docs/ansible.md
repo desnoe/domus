@@ -189,12 +189,16 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   *(The `-K` flag interactively prompts for the `become` password in your terminal; passwords are never saved to disk or git).*
 
 ### 2. `ansible/system.yml`
-- **Purpose**: System-wide baseline configuration, package management, security hardening, service management, and GitHub Actions self-hosted runner provisioning/upgrades. Completely decoupled from storage management.
-- **Target hosts**: Play 1 on `hosts: all`; Play 2 on `hosts: runner`
-- **Roles executed**: `apt`, `base`, `htop`, `locales`, `ntp`, `sshd`, `sudo`, `ufw`, `vim` (on `all`), and `runner` (on `runner`).
+- **Purpose**: System-wide baseline configuration, package management, security hardening, service management, GitHub Actions self-hosted runner provisioning/upgrades, and Samba file sharing with Previous Versions.
+- **Target hosts**: Play 1 on `hosts: all`; Play 2 on `hosts: runner`; Play 3 on `hosts: crypto`.
+- **Roles executed**: `apt`, `base`, `htop`, `locales`, `ntp`, `sshd`, `sudo`, `ufw`, `vim` (on `all`), `runner` (on `runner`), and `samba` (on `crypto`, tagged with `samba`).
 - **Usage**:
   ```bash
+  # Full system run across all hosts
   uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml
+
+  # Target Samba service configuration only
+  uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml --tags samba
   ```
 
 ### 3. `ansible/storage-unlock.yml`
@@ -264,9 +268,10 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 
 ## 🚑 Disaster Recovery, CI/CD & Verification Guides
 
+- 👉 **[macOS User Guide: File Sharing & Snapshots](mac-user-guide.md)**: Finder SMB3 connection, Previous Versions snapshot navigation, and automated Mac backups via `rsync` over SSH.
 - 👉 **[GitHub Actions CI/CD & Self-Hosted Runner Setup Guide](github-ci-runner-setup.md)**: Two-stage pipeline architecture, `local-runner` protection gate, and `runner.delarche.fr` setup.
 - 👉 **[Disaster Recovery & Storage Operations Guide](disaster-recovery.md)**: Manual unlock without Ansible, snapshot restoration, and LUKS header restoration from `/var/backups/luks/`.
-- 👉 **[Test Book & Non-Regression Verification Guide](testing.md)**: Full catalog of test cards (`TC-QA`, `TC-SYS`, `TC-FW`, `TC-STO`, `TC-BAK`, `TC-ADV`) and master non-regression runbook.
+- 👉 **[Test Book & Non-Regression Verification Guide](testing.md)**: Full catalog of test cards (`TC-QA`, `TC-SYS`, `TC-FW`, `TC-STO`, `TC-BAK`, `TC-SMB`, `TC-ADV`) and master non-regression runbook.
 
 ---
 
@@ -282,6 +287,7 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 | **`ntp`** | Sets timezone (`Europe/Paris`) and configures `chrony` (`fr.pool.ntp.org`, `rtcsync`, `leapseclist`, and `leapsecmode slew` for monotonic leap seconds). | `/etc/chrony/chrony.conf`, `tzdata`, `chrony` service |
 | **`rclone`** | Installs `rclone`, copies local `~/.config/rclone/rclone.conf` (`mode: "0600"`, `no_log: true`), and deploys sandboxed `systemd` service and timer units (`rclone-sync-<slug>.{service,timer}`) invoking `/usr/bin/rclone sync` directly with kernel mount protection (`Requisite=`, `BindsTo=`, `AssertPathIsMountPoint=`) and `ProtectSystem=strict`. | `~/.config/rclone/rclone.conf`, `/etc/systemd/system/rclone-sync-*.{service,timer}` |
 | **`runner`** | Installs CI/CD and .NET runtime dependencies (`git`, `curl`, `jq`, `shellcheck`, `rsync`, `libicu-dev`, `libssl-dev`), copies local `~/.ansible_vault_pass` (`mode: "0600"`, `no_log: true`) and `~/.config/rclone/rclone.conf` (`mode: "0600"`, `no_log: true`), generates `/home/{{ ansible_user }}/.ssh/id_ed25519` on the runner, adds `debian.delarche.fr` to `known_hosts`, authorizes the runner's public key on `debian.delarche.fr`, and installs/upgrades the official GitHub Actions Runner (`actions/runner`) release in `/opt/actions-runner`. | `/opt/actions-runner`, `~/.ansible_vault_pass`, `~/.config/rclone/rclone.conf`, `~/.ssh/id_ed25519` |
+| **`samba`** | Deploys Samba SMB3 service on `crypto` hosts: serves Btrfs subvolumes in read-only mode with native Windows and macOS Previous Versions support via `vfs_shadow_copy2` mapped to `btrfs-snapshot` retention directories, provisions vault-encrypted credentials via `smbpasswd`, ensures `~/data/sync/mac` target directory exists when mounted, and configures LAN-restricted UFW firewall rules (port 445/tcp). | `/etc/samba/smb.conf`, `smbd` service, `/home/{{ ansible_user }}/data/sync/mac` |
 | **`snapshot`** | Manages Btrfs snapshot automation: deploys streamlined `/home/{{ ansible_user }}/bin/snapshot.sh` (30 daily + 52 weekly ISO retention) and configures sandboxed `systemd` service and timer units (`btrfs-snapshot-<name>.{service,timer}`) with dual mount binding and read-only source protection (`ProtectSystem=strict`, `ReadWritePaths={{ item.destination }}`). | `/home/{{ ansible_user }}/bin/snapshot.sh`, `/etc/systemd/system/btrfs-snapshot-*.{service,timer}` |
 | **`sshd`** | Automatically discovers all local `~/.ssh/*.pub` public keys and ensures they are present in `~/.ssh/authorized_keys` (`exclusive: false`), and hardens `/etc/ssh/sshd_config` (disables root login and password authentication, validated via `sshd -t -f %s`). | `/etc/ssh/sshd_config`, `~/.ssh/authorized_keys` |
 | **`sudo`** | Creates `wheel` group, configures `/etc/sudoers.d/99-ansible-wheel` (validated via `visudo`), and configures user `{{ ansible_user }}` with wheel group membership and bash shell without managing local passwords. | `/etc/sudoers.d/99-ansible-wheel`, `/etc/passwd` |

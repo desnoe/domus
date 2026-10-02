@@ -107,6 +107,18 @@
         - rclone
         - status
 
+    - name: Report Samba file sharing status
+      ansible.builtin.include_role:
+        name: samba
+        tasks_from: status
+        apply:
+          tags:
+            - samba
+            - status
+      tags:
+        - samba
+        - status
+
 - name: Report GitHub Actions runner status
   hosts: runner
   become: true

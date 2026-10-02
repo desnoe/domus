@@ -93,8 +93,11 @@ jobs:
       - name: "Step 3: Backup Idempotence, OneDrive Sync & Btrfs Snapshot (TC-BAK-01..03)"
         run: ./scripts/test-lab.sh backup-and-sync
 
-      - name: "Step 4: Advanced Corner Cases, Header Restore & RAID1 Rebuild (TC-ADV-01..06)"
+      - name: "Step 4: Samba Deployment, SMB Connectivity & Shadow Copies (TC-SMB-01..07)"
+        run: ./scripts/test-lab.sh samba
+
+      - name: "Step 5: Advanced Corner Cases, Header Restore & RAID1 Rebuild (TC-ADV-01..06)"
         run: ./scripts/test-lab.sh corner-cases-and-raid1
 
-      - name: "Step 5: Full System, Storage & Backup Health Report (TC-BAK-04)"
+      - name: "Step 6: Full System, Storage & Backup Health Report (TC-BAK-04)"
         run: ./scripts/test-lab.sh status

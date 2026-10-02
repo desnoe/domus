@@ -4,3 +4,6 @@
 
 # Decryption passphrase for LUKS block devices
 luks_pass: "CHANGE_ME_LUKS_PASSPHRASE"
+
+# Samba password for user access to SMB shares
+samba_pass: "CHANGE_ME_SAMBA_PASSWORD"

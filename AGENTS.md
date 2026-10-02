@@ -59,12 +59,12 @@
 
 Playbooks are strictly separated by operational responsibility (no role duplication):
 1. `ansible/bootstrap.yml`: Day-0 SSH key & passwordless sudo setup (`apt`, `sudo`, `sshd`), chaining `ansible/system.yml`.
-2. `ansible/system.yml`: OS baseline, packages, firewall (`ufw`), time sync (`ntp`), and hardening (`hosts: all`), plus GitHub Actions self-hosted runner provisioning/upgrades via the `runner` role (`hosts: runner`).
+2. `ansible/system.yml`: OS baseline, packages, firewall (`ufw`), time sync (`ntp`), and hardening (`hosts: all`), GitHub Actions self-hosted runner provisioning/upgrades via the `runner` role (`hosts: runner`), and Samba file sharing with Previous Versions via the `samba` role (`hosts: crypto`).
 3. `ansible/storage-unlock.yml`: Non-destructive post-reboot LUKS unlock, `btrfs device scan`, and subvolume mounting (`hosts: crypto`).
 4. `ansible/storage-wipe-and-reset.yml`: Destructive storage reset with interactive `WIPE` confirmation (`hosts: crypto`).
 5. `ansible/storage-replace.yml`: Guided Btrfs RAID1 member disk replacement (`hosts: crypto`), supporting auto-detection of unformatted/closed disks across multiple pools or targeted replacement via `-e replace_pool=<pool> -e replace_index=<idx>`.
 6. `ansible/backup.yml`: Deploys `snapshot` and `rclone` `systemd.service` and `systemd.timer` units (`hosts: crypto`).
-7. `ansible/status.yml`: Read-only health reporting across `base`, `locales`, `ntp`, `sshd`, `ufw` (`hosts: all`), `crypto`, `snapshot`, `rclone` (`hosts: crypto`), and `runner` (`hosts: runner`) roles (supports `--tags base|locales|ntp|sshd|ufw|crypto|snapshot|rclone|runner`).
+7. `ansible/status.yml`: Read-only health reporting across `base`, `locales`, `ntp`, `sshd`, `ufw` (`hosts: all`), `crypto`, `snapshot`, `rclone`, `samba` (`hosts: crypto`), and `runner` (`hosts: runner`) roles (supports `--tags base|locales|ntp|sshd|ufw|crypto|snapshot|rclone|samba|runner`).
 
 ---
 

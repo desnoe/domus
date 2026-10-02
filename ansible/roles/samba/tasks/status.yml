@@ -1,0 +1,37 @@
+---
+- name: Query smbd service status  # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: systemctl status smbd --no-pager
+  register: samba_service_status_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Query Samba listening ports  # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: ss -tlnp sport = :445
+  register: samba_ports_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Query Samba share list  # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: testparm -s --suppress-prompt
+  register: samba_testparm_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Display Samba Status Report
+  ansible.builtin.debug:
+    msg: |
+      =======================================================
+      SAMBA FILE SHARING REPORT: {{ inventory_hostname }}
+      =======================================================
+      Service Status:
+      {{ samba_service_status_cmd.stdout | default('smbd not installed.', true) }}
+      -------------------------------------------------------
+      Listening Ports (445/tcp):
+      {{ samba_ports_cmd.stdout | default('No Samba ports found.', true) }}
+      -------------------------------------------------------
+      Share Configuration (testparm):
+      {{ samba_testparm_cmd.stdout | default('No Samba configuration found.', true) }}
+      =======================================================

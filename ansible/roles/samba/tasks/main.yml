@@ -1,0 +1,61 @@
+---
+- name: Install Samba packages
+  become: true
+  ansible.builtin.apt:
+    name:
+      - samba
+    state: present
+
+- name: Deploy Samba configuration
+  become: true
+  ansible.builtin.template:
+    src: smb.conf.j2
+    dest: /etc/samba/smb.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "testparm -s %s"
+  notify: Restart smbd
+
+- name: Set Samba password for user {{ ansible_user }}
+  become: true
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -o pipefail
+      printf '%s\n%s\n' '{{ samba_pass }}' '{{ samba_pass }}' | smbpasswd -s -a '{{ ansible_user }}'
+  changed_when: false
+  no_log: true
+
+- name: Check if sync subvolume is mounted
+  ansible.builtin.command:
+    cmd: findmnt -n "/home/{{ ansible_user }}/data/sync"
+  register: samba_sync_mount_check
+  changed_when: false
+  failed_when: false
+
+- name: Ensure target directory for Mac backup exists
+  when: samba_sync_mount_check.rc == 0
+  become: true
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/data/sync/mac"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: Enable and start smbd service
+  become: true
+  ansible.builtin.service:
+    name: smbd
+    state: started
+    enabled: true
+
+- name: Allow Samba SMB through firewall (LAN only)
+  become: true
+  community.general.ufw:
+    rule: allow
+    port: "445"
+    proto: tcp
+    from_ip: "{{ samba_allowed_subnet }}"
+    comment: "Allow Samba SMB (LAN)"
