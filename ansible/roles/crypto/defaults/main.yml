@@ -1,7 +1,19 @@
 ---
 crypto_wipe: false
 
-crypto_btrfs_default_mount_options: "defaults,nofail,compress=zstd:1,noatime,user_subvol_rm_allowed"
+# Default mount options for Btrfs subvolumes in /etc/fstab:
+# - rw,async: Explicitly locks read-write and asynchronous I/O mode (critical for SMR
+#   drives such as Seagate Barracuda, allowing the kernel page cache to buffer and
+#   schedule writes sequentially before flushing, avoiding process stalls).
+# - nofail: Prevents boot failure if encrypted devices are not yet unlocked.
+# - compress=zstd:1: Fast, low-latency compression chosen over zstd:3 to emit steady,
+#   rapid write streams that feed the SMR CMR cache without erratic latency spikes.
+# - noatime: Eliminates metadata write overhead on read operations.
+# - user_subvol_rm_allowed: Permits unprivileged subvolume deletion for snapshot rotation.
+# Note: 'defaults' is replaced by explicit 'rw,async' to avoid conflicts with 'boot: false'
+# in ansible.posix.mount (which emits warnings when 'defaults' is present).
+# Note: 'autodefrag' is intentionally avoided to prevent destructive SMR write amplification.
+crypto_btrfs_default_mount_options: "rw,async,nofail,compress=zstd:1,noatime,user_subvol_rm_allowed"
 
 
 # Declarative list of encrypted block devices or RAID pools to manage on the host.

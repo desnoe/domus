@@ -181,7 +181,7 @@ flowchart LR
 - **Expected Result**:
   - `/var/backups/luks/luks-header-{data,backup}-{0,1}.img` present with mode `0400`.
   - `btrfs filesystem df /home/olivier/data/sync` and `/home/olivier/backup` show `Data, RAID1` and `Metadata, RAID1`.
-  - `/home/olivier/data/sync`, `/home/olivier/data/snapshots`, and `/home/olivier/backup` are mounted with `compress=zstd:1,noatime,user_subvol_rm_allowed`.
+  - `/home/olivier/data/sync`, `/home/olivier/data/snapshots`, and `/home/olivier/backup` are mounted with `rw,async,compress=zstd:1,noatime,user_subvol_rm_allowed`.
 
 ---
 

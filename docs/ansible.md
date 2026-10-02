@@ -36,11 +36,18 @@ flowchart TD
    - Btrfs pools are initialized with filesystem label `-L {{ disk_name }}`.
    - `btrfs device scan` registers all opened member mappers with the kernel.
    - Subvolumes are mounted in `/etc/fstab` using `src: "LABEL={{ disk_name }}"` (e.g. `LABEL=data`), guaranteeing clean pool assembly regardless of device enumeration order.
-   - Each entry in `subvolumes` is an explicit absolute mount path (e.g. `/home/{{ ansible_user }}/data/sync`). Its internal Btrfs subvolume name is deterministically derived by flattening slashes into underscores (`home_olivier_data_sync`) and mounted with options `noauto,nofail,compress=zstd:1,noatime,user_subvol_rm_allowed,subvol=<flattened_name>`.
+   - Each entry in `subvolumes` is an explicit absolute mount path (e.g. `/home/{{ ansible_user }}/data/sync`). Its internal Btrfs subvolume name is deterministically derived by flattening slashes into underscores (`home_olivier_data_sync`) and mounted with options `rw,async,noauto,nofail,compress=zstd:1,noatime,user_subvol_rm_allowed,subvol=<flattened_name>`.
    - `noauto,nofail`: Ensures the host boots reliably without emergency shell drops before encrypted LUKS containers are unlocked.
    - `user_subvol_rm_allowed`: Enables snapshot rotation by `ansible_user` without root elevation.
-   - `compress=zstd:1`: Transparent filesystem-level compression reducing flash wear and disk space usage.
-   - `noatime`: Eliminates metadata write overhead on read operations.
+
+#### SMR Drive Optimization & Mount Options Rationale
+Our storage configuration specifically accounts for mechanical SMR (Shingled Magnetic Recording) drives (e.g., Seagate Barracuda):
+- **SMR Architecture Challenges**: SMR drives overlap data tracks like roof shingles to increase areal density. Modifying existing data requires reading an entire band of overlapping tracks into cache, modifying the target sectors, and rewriting the entire band sequentially (Read-Modify-Write cycle). To manage this, SMR drives use a small internal CMR (Conventional Magnetic Recording) write cache. If write bursts are too aggressive, erratic, or fragmented, the CMR cache quickly exhausts, forcing the drive firmware into synchronous on-disk band rewrites that cause severe I/O latency spikes and throughput collapse.
+- **`rw,async` (Explicit Asynchronous I/O Baseline)**: While standard Linux mount options (`defaults`) include asynchronous I/O, Ansible's `mount` module rejects `defaults` when paired with `boot: false` due to an internal conflict with `auto`. We explicitly specify `rw,async` to lock the asynchronous baseline. Asynchronous I/O allows the Linux kernel page cache to buffer, aggregate, and reorder writes in RAM before dispatching them to the drive controller in large sequential flushes, preventing processes from stalling on slow physical shingled tracks.
+- **`compress=zstd:1` (Ultra-Fast Compression)**: Lowered from `zstd:3` to `zstd:1`. Level 1 is the fastest Zstandard compression profile in Btrfs. While saving slightly less disk space than level 3, level 1 drastically cuts CPU latency and eliminates uneven write pauses. It streams compressed extents almost instantaneously into the kernel I/O queue, delivering a predictable, continuous data flow that allows the SMR drive's CMR cache to drain efficiently without saturating.
+- **`noatime` (Read Metadata Optimization)**: Disables access time updates on read operations, eliminating unnecessary random metadata writes that would otherwise fragment SMR tracks and accelerate flash wear.
+- **Omission of `autodefrag`**: Btrfs `autodefrag` is intentionally omitted. Background defragmentation causes severe write amplification and triggers constant, destructive Read-Modify-Write cycles across SMR shingle bands.
+- **Rclone Transfer Throttling (`--transfers 2 --checkers 4 --buffer-size 32M --fast-list`)**: Configured in `rclone-sync-*.service` to pace inbound network transfers, preventing parallel sync threads from overwhelming both the Btrfs writeback queue and the SMR drive's CMR buffer cache.
 
 4. **Systemd Backup Services & Timers (`rclone-sync-*` & `btrfs-snapshot-*`)**:
    - Instead of legacy `cron` jobs and wrapper scripts, both cloud synchronization (`rclone`) and local Btrfs snapshots (`snapshot`) are orchestrated by native `systemd.service` and `systemd.timer` units under `/etc/systemd/system/`.
