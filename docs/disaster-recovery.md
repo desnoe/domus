@@ -207,3 +207,139 @@ sudo btrfs scrub start -B ~/data/sync
 sudo btrfs scrub status ~/data/sync
 ```
 Verify that `csum_errors`, `verify_errors`, and `uncorrectable_errors` report `0`.
+
+---
+
+## 🗑️ Scenario 6: Manual Decommissioning / Deletion of an Encrypted Disk or RAID Pool
+
+Use this procedure when permanently decommissioning, repurposing, or removing an encrypted disk or an entire Btrfs RAID pool without intending to restore it.
+
+### Phase 1: Pre-Checks & Dependency Teardown
+
+1. **Identify mappers, mount points, and physical block devices**:
+   ```bash
+   # List active block devices and LUKS mappers
+   lsblk -o NAME,TYPE,FSTYPE,SIZE,MOUNTPOINTS
+
+   # Check filesystem label and active mounts
+   findmnt -t btrfs
+   ```
+
+2. **Stop dependent background services and timers**:
+   Stop any systemd timers and services that access the storage pool to prevent I/O errors or automatic job triggers:
+   ```bash
+   # Stop snapshot services and timers for this pool
+   sudo systemctl stop btrfs-snapshot-<pool>.service btrfs-snapshot-<pool>.timer
+
+   # Stop cloud sync timers if backing up from/to this pool
+   sudo systemctl stop rclone-sync-*.service rclone-sync-*.timer
+
+   # If shared via Samba, stop or reload smbd
+   sudo systemctl stop smbd.service
+   ```
+
+3. **Verify active file handles and processes**:
+   Ensure no process is holding open files or directories on any of the mount points:
+   ```bash
+   # Check for open file handles on mount points (repeat for each mount point)
+   sudo fuser -mv /path/to/mountpoint
+   ```
+   If any processes are listed, terminate them cleanly before proceeding.
+
+---
+
+### Phase 2: Teardown & Metadata Wiping
+
+Choose **Case A** for a single standalone encrypted disk, or **Case B** for a multi-disk RAID pool.
+
+#### Case A: Single Encrypted Disk (Non-RAID)
+
+Assuming pool `<pool>` with mapper `<pool>-0` on underlying physical disk `/dev/disk/by-id/<disk-id>` mounted at `/path/to/mount`:
+
+1. **Unmount the subvolumes / filesystem**:
+   ```bash
+   sudo umount /path/to/mount
+   ```
+
+2. **Deregister the Btrfs device from the kernel scan cache**:
+   ```bash
+   sudo btrfs device scan --forget /dev/mapper/<pool>-0
+   ```
+
+3. **Close the LUKS encrypted container**:
+   ```bash
+   sudo cryptsetup luksClose <pool>-0
+   ```
+   Verify the mapper is closed:
+   ```bash
+   ls -l /dev/mapper/<pool>-0
+   # Should report: No such file or directory
+   ```
+
+4. **Wipe filesystem and partition signatures**:
+   ```bash
+   sudo wipefs -a /dev/disk/by-id/<disk-id>
+   ```
+
+5. **Wipe LUKS headers and superblock metadata**:
+   Zero out the first 32 MiB of the physical device to permanently erase the LUKS header and keyslots:
+   ```bash
+   sudo dd if=/dev/zero of=/dev/disk/by-id/<disk-id> bs=1M count=32 status=progress conv=fdatasync
+   ```
+
+---
+
+#### Case B: Multi-Disk Member Pool (Btrfs RAID1)
+
+Assuming pool `<pool>` with multiple member disks (e.g. `/dev/disk/by-id/<disk1>`, `/dev/disk/by-id/<disk2>`) and mappers `<pool>-0`, `<pool>-1`:
+
+1. **Unmount all subvolumes belonging to the pool**:
+   ```bash
+   # Unmount all subvolumes mounted from this pool label
+   for mp in $(awk -v l="LABEL=<pool>" '$1 == l {print $2}' /etc/fstab); do
+     sudo umount "$mp"
+   done
+   ```
+
+2. **Deregister Btrfs devices and close all LUKS mappers**:
+   ```bash
+   for mapper in <pool>-0 <pool>-1; do
+     sudo btrfs device scan --forget "/dev/mapper/${mapper}" 2>/dev/null || true
+     sudo cryptsetup luksClose "${mapper}"
+   done
+   ```
+
+3. **Wipe filesystem signatures and headers across all member physical devices**:
+   ```bash
+   for dev in /dev/disk/by-id/<disk1> /dev/disk/by-id/<disk2>; do
+     sudo wipefs -a "$dev"
+     sudo dd if=/dev/zero of="$dev" bs=1M count=32 status=progress conv=fdatasync
+   done
+   ```
+
+---
+
+### Phase 3: System & Ansible Post-Cleanup
+
+1. **Remove persistent mount entries from `/etc/fstab`**:
+   Edit `/etc/fstab` and remove all lines referencing `LABEL=<pool>`:
+   ```bash
+   sudo sed -i '/LABEL=<pool>[[:space:]]/d' /etc/fstab
+   sudo systemctl daemon-reload
+   ```
+
+2. **Remove archived LUKS header backups**:
+   ```bash
+   sudo rm -f /var/backups/luks/luks-header-<pool>-*.img
+   ```
+
+3. **Remove empty mount point directories (optional)**:
+   ```bash
+   sudo rmdir /path/to/mountpoint
+   ```
+
+4. **Update Ansible Inventory / Host Variables**:
+   In `ansible/envs/<env>/host_vars/<hostname>/main.yml`:
+   - Remove the pool definition from `crypto_disks`.
+   - Remove any associated jobs from `snapshot_jobs`, `rclone_jobs`, or shares from `samba_shares`.
+   - Run `ansible/system.yml` to apply clean baseline configurations.

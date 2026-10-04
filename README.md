@@ -114,13 +114,19 @@ Assisted workflow to format LUKS on a replacement drive, mount degraded if neces
 uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-replace.yml
 ```
 
-### 6. Configure Backup Services (Snapshots & Rclone)
+### 6. Decommission & Remove an Encrypted Storage Pool
+Permanently unmounts, closes, and wipes an encrypted storage pool (both single disk or multi-disk RAID pool). Includes interactive selection and safety confirmation (or non-interactive `-e remove_pool=<pool> -e confirm_remove=yes`):
+```bash
+uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-remove.yml
+```
+
+### 7. Configure Backup Services (Snapshots & Rclone)
 Copies your local `~/.config/rclone/rclone.conf` (`0600`), deploys `/home/{{ ansible_user }}/bin/snapshot.sh`, and configures sandboxed `systemd.service` and `systemd.timer` units for automated Btrfs snapshotting and cloud sync:
 ```bash
 uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/backup.yml
 ```
 
-### 7. Check Storage and System Health (Read-Only)
+### 8. Check Storage and System Health (Read-Only)
 Inspects base system identity/uptime, locales/keyboard, time/NTP sync, SSH daemon/authorized keys, UFW firewall status, LUKS encryption status, header backup presence, SMART health, Btrfs usage/error stats, `btrfs-snapshot-*` / `rclone-sync-*` systemd timers, `journald` logs, `rclone` remote configuration status, and Samba file sharing status:
 ```bash
 # Full health report

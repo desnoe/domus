@@ -229,6 +229,23 @@ flowchart LR
 
 ---
 
+### `TC-STO-05` — Non-Interactive Pool Removal & Verification (`storage-remove.yml`)
+- **Objective**: Verify non-interactive pool decommissioning via `storage-remove.yml -e remove_pool=backup -e confirm_remove=yes`, confirming full unmounting, mapper closing, metadata/header wipe, `/etc/fstab` cleanup, and header backup removal.
+- **Preconditions**: `backup` pool is unlocked and mounted on the lab host.
+- **Commands**:
+  ```bash
+  ANSIBLE_HOME=/tmp/.ansible uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-remove.yml -e remove_pool=backup -e confirm_remove=yes
+  ssh olivier@debian.delarche.fr "mountpoint -q /home/olivier/backup || echo 'UNMOUNTED'; ls -l /dev/mapper/backup-* 2>/dev/null || echo 'CLOSED'; sudo cryptsetup isLuks /dev/sdd || echo 'WIPED_SDD'; sudo cryptsetup isLuks /dev/sde || echo 'WIPED_SDE'; grep -c 'LABEL=backup' /etc/fstab || echo 'FSTAB_CLEAN'"
+  ```
+- **Expected Result**:
+  - `/home/olivier/backup` is unmounted (`UNMOUNTED`).
+  - `/dev/mapper/backup-0` and `backup-1` are closed (`CLOSED`).
+  - Physical devices `/dev/sdd` and `/dev/sde` are no longer valid LUKS containers (`isLuks` fails, reporting `WIPED_SDD` and `WIPED_SDE`).
+  - `/etc/fstab` contains 0 entries for `LABEL=backup` (`FSTAB_CLEAN`).
+  - Stale header files `/var/backups/luks/luks-header-backup-*.img` are absent.
+
+---
+
 ## 5. Cloud Sync (`rclone`) & Btrfs Snapshots (`snapshot`) via `systemd` (`TC-BAK`)
 
 ### `TC-BAK-01` — `backup.yml` Deployment, Official `rclone` Package & Idempotence

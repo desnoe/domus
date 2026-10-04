@@ -1,0 +1,59 @@
+---
+- name: Remove and wipe encrypted storage pool
+  hosts: crypto
+  become: true
+  gather_facts: true
+  serial: 1
+
+  pre_tasks:
+    - name: Verify storage pools are defined
+      when: (crypto_disks | default([])) | length == 0
+      ansible.builtin.fail:
+        msg: "No crypto_disks defined for this host."
+
+    - name: Display available storage pools
+      when: remove_pool is not defined
+      ansible.builtin.debug:
+        msg: >-
+          Configured storage pools on {{ inventory_hostname }}:
+          {{ crypto_disks | map(attribute='name') | list | join(', ') }}
+
+    - name: Prompt for target pool name
+      when: remove_pool is not defined
+      ansible.builtin.pause:
+        prompt: "Enter the name of the storage pool to permanently remove and wipe"
+      register: remove_pool_prompt
+
+    - name: Set resolved target pool fact
+      ansible.builtin.set_fact:
+        target_remove_pool: "{{ remove_pool | default((remove_pool_prompt.user_input | default('')) | trim) }}"
+
+    - name: Validate target pool exists in crypto_disks
+      when: target_remove_pool not in (crypto_disks | map(attribute='name') | list)
+      ansible.builtin.fail:
+        msg: >-
+          Pool '{{ target_remove_pool }}' does not exist in crypto_disks for {{ inventory_hostname }}.
+          Available pools: {{ crypto_disks | map(attribute='name') | list | join(', ') }}
+
+    - name: Safety confirmation prompt
+      when: not (confirm_remove | default(false) | bool)
+      ansible.builtin.pause:
+        prompt: >-
+          WARNING: This will permanently wipe all member disks and destroy all data in pool
+          '{{ target_remove_pool }}' on {{ inventory_hostname }}. Type 'REMOVE' to proceed
+      register: remove_confirm_prompt
+
+    - name: Verify safety confirmation
+      when:
+        - not (confirm_remove | default(false) | bool)
+        - (remove_confirm_prompt.user_input | default('')) != 'REMOVE'
+      ansible.builtin.fail:
+        msg: "Aborting: Removal confirmation not given ('REMOVE' required, or confirm_remove=yes extra var)."
+
+  tasks:
+    - name: Execute pool removal workflow
+      ansible.builtin.include_role:
+        name: crypto
+        tasks_from: remove
+      vars:
+        crypto_target_pool: "{{ target_remove_pool }}"

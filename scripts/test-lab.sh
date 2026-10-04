@@ -301,6 +301,25 @@ grep -q "CI_SURVIVAL_OK" /home/olivier/backup/sync/ci_test.txt
 sudo btrfs scrub start -B /home/olivier/backup/sync
 rm -f /home/olivier/backup/sync/ci_test.txt
 EOF
+
+    # TC-STO-05: Non-interactive pool removal via storage-remove.yml
+    uv run ansible-playbook -i "${LAB_INVENTORY}" ansible/storage-remove.yml \
+        -e remove_pool=backup -e confirm_remove=yes
+
+    run_remote << 'EOF'
+! mountpoint -q /home/olivier/backup
+[ ! -e /dev/mapper/backup-0 ]
+[ ! -e /dev/mapper/backup-1 ]
+! sudo cryptsetup isLuks /dev/sdd
+! sudo cryptsetup isLuks /dev/sde
+! grep -q 'LABEL=backup' /etc/fstab
+[ ! -f /var/backups/luks/luks-header-backup-0.img ]
+[ ! -f /var/backups/luks/luks-header-backup-1.img ]
+EOF
+
+    # Restore backup pool so lab remains fully provisioned
+    uv run ansible-playbook -i "${LAB_INVENTORY}" ansible/storage-wipe-and-reset.yml \
+        -e confirm_wipe=yes
 }
 
 step_status() {
@@ -317,7 +336,7 @@ Subcommands:
   storage-wipe-and-unlock  Run storage-wipe-and-reset.yml and verify storage-unlock.yml idempotence (TC-STO-01..02)
   backup-and-sync          Verify backup.yml idempotence, OneDrive sync (primary & secondary), snapshots, TC-BAK-05..07
   samba                    Deploy Samba, verify idempotence, SMB connectivity, shadow copies, and security (TC-SMB-01..07)
-  corner-cases-and-raid1   Run TC-ADV-01..06 corner cases, LUKS header restore, and RAID1 disk replacement
+  corner-cases-and-raid1   Run TC-ADV-01..06, RAID1 disk replacement, and pool removal (TC-STO-04..05)
   status                   Run full read-only health report via ansible/status.yml (TC-BAK-04)
   all                      Execute the complete non-regression campaign sequentially
 EOF

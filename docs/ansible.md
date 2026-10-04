@@ -255,7 +255,21 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-replace.yml -e replace_pool=data -e replace_index=0
   ```
 
-### 6. `ansible/backup.yml`
+### 6. `ansible/storage-remove.yml`
+- **Purpose**: Targeted permanent decommissioning and wiping of an encrypted storage pool (both single-disk and multi-disk RAID pools).
+- **Target hosts**: `hosts: crypto`
+- **Safety**: Interactive confirmation requiring typing `REMOVE` in uppercase (or `-e confirm_remove=yes`).
+- **Workflow**: Prompts for or validates pool name against `crypto_disks`, stops active `btrfs-snapshot-*` systemd timers/services, unmounts all pool subvolumes, removes `/etc/fstab` entries, reloads systemd daemon, deregisters Btrfs devices (`btrfs device scan --forget`), closes LUKS mappers (`cryptsetup luksClose`), wipes filesystem signatures and first 32 MiB on physical member disks (`wipefs -a` and `dd`), and purges LUKS header backups from `/var/backups/luks/`.
+- **Usage**:
+  ```bash
+  # Interactive mode (prompts for pool name and 'REMOVE' confirmation)
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-remove.yml
+
+  # Non-interactive mode (for automation / CI)
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-remove.yml -e remove_pool=backup -e confirm_remove=yes
+  ```
+
+### 7. `ansible/backup.yml`
 - **Purpose**: Configures automated Btrfs snapshot and cloud synchronization `systemd` services and timers.
 - **Target hosts**: `hosts: crypto`
 - **Roles executed**:
@@ -266,7 +280,7 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/backup.yml
   ```
 
-### 7. `ansible/status.yml`
+### 8. `ansible/status.yml`
 - **Purpose**: Non-destructive, read-only diagnostic playbook reporting base host identity/uptime, locales/keyboard layout, time/NTP synchronization, SSH daemon settings and authorized key fingerprints, UFW firewall status, LUKS container status, header backups, SMART health, Btrfs usage and error stats, `btrfs-snapshot-*` / `rclone-sync-*` systemd timers, `journald` logs, `rclone` remote configuration status, and GitHub Actions self-hosted runner health.
 - **Roles executed**: Modularly imports status tasks from `base`, `locales`, `ntp`, `sshd`, `ufw` (`hosts: all`), `crypto`, `snapshot`, `rclone` (`hosts: crypto`), and `runner` (`hosts: runner`).
 - **Usage**:

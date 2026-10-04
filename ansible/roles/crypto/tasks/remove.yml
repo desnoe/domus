@@ -1,0 +1,86 @@
+---
+- name: "Find pool configuration for pool: {{ crypto_target_pool }}"
+  ansible.builtin.set_fact:
+    crypto_pool_to_remove: "{{ (crypto_disks | selectattr('name', 'equalto', crypto_target_pool) | list | first) }}"
+
+- name: "Stop any active systemd snapshot services for pool: {{ crypto_target_pool }}"
+  ansible.builtin.systemd:
+    name: "btrfs-snapshot-{{ crypto_target_pool }}.service"
+    state: stopped
+  failed_when: false
+
+- name: "Stop any active systemd snapshot timers for pool: {{ crypto_target_pool }}"
+  ansible.builtin.systemd:
+    name: "btrfs-snapshot-{{ crypto_target_pool }}.timer"
+    state: stopped
+  failed_when: false
+
+- name: "Unmount all subvolumes for pool: {{ crypto_target_pool }}"
+  become: true
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -euo pipefail
+      label="{{ crypto_target_pool }}"
+      for mp in $(awk -v l="LABEL=$label" '$1 == l {print $2}' /etc/fstab); do
+        umount "$mp" 2>/dev/null || true
+      done
+      for subvol in {% for s in crypto_pool_to_remove.subvolumes %}"{{ s }}" {% endfor %}; do
+        umount "$subvol" 2>/dev/null || true
+      done
+  changed_when: true
+
+- name: "Remove /etc/fstab entries for pool: {{ crypto_target_pool }}"
+  become: true
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: "^LABEL={{ crypto_target_pool }}[[:space:]]"
+    state: absent
+
+- name: Reload systemd daemon to purge obsolete mount units
+  become: true
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: "Deregister and close LUKS mappers for pool: {{ crypto_target_pool }}"
+  become: true
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -o pipefail
+      mapper="{{ crypto_target_pool }}-{{ idx }}"
+      if [ -e "/dev/mapper/$mapper" ]; then
+        btrfs device scan --forget "/dev/mapper/$mapper" 2>/dev/null || true
+        cryptsetup luksClose "$mapper"
+      fi
+  loop: "{{ crypto_pool_to_remove.devices }}"
+  loop_control:
+    index_var: idx
+  changed_when: true
+
+- name: "Wipe signatures and headers on physical member disks for pool: {{ crypto_target_pool }}"
+  become: true
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -euo pipefail
+      dev="{{ item }}"
+      wipefs -a "$dev"
+      dd if=/dev/zero of="$dev" bs=1M count=32 status=none conv=fdatasync
+  loop: "{{ crypto_pool_to_remove.devices }}"
+  changed_when: true
+
+- name: "Remove stale LUKS header backups for pool: {{ crypto_target_pool }}"
+  become: true
+  ansible.builtin.file:
+    path: "/var/backups/luks/luks-header-{{ crypto_target_pool }}-{{ idx }}.img"
+    state: absent
+  loop: "{{ crypto_pool_to_remove.devices }}"
+  loop_control:
+    index_var: idx
+
+- name: Display post-removal notice
+  ansible.builtin.debug:
+    msg: >-
+      Successfully removed and wiped pool '{{ crypto_target_pool }}' on {{ inventory_hostname }}.
+      Remember to remove '{{ crypto_target_pool }}' from crypto_disks in host_vars/{{ inventory_hostname }}/main.yml.
