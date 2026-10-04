@@ -5,6 +5,7 @@
   register: rclone_installed_version
   changed_when: false
   failed_when: false
+  check_mode: false
 
 - name: Query latest upstream rclone version
   ansible.builtin.uri:
@@ -12,6 +13,7 @@
     return_content: true
   register: rclone_upstream_version
   changed_when: false
+  check_mode: false
 
 - name: Install or upgrade official rclone package
   when: >-
@@ -35,50 +37,65 @@
     mode: "0600"
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
+    force: false
   no_log: true
 
-- name: "Deploy rclone systemd service unit: {{ item.provider }}"
+- name: Validate and resolve rclone jobs
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Query systemd mount unit names for rclone mount paths
+  when: (rclone_jobs_resolved | default([])) | length > 0
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['systemd-escape', '--path', '--suffix=mount'] +
+        (rclone_jobs_resolved | map(attribute='mount_path') | unique | sort | list)
+      }}
+  register: rclone_mount_units_cmd
+  changed_when: false
+  check_mode: false
+
+- name: Record mapping of mount paths to systemd mount unit names
+  ansible.builtin.set_fact:
+    rclone_mount_dict: >-
+      {{
+        dict(
+          (rclone_jobs_resolved | map(attribute='mount_path') | unique | sort | list)
+          | zip(rclone_mount_units_cmd.stdout | default('') | split)
+        )
+      }}
+
+- name: Deploy rclone systemd service unit
   ansible.builtin.template:
     src: rclone-sync.service.j2
-    dest: >-
-      /etc/systemd/system/rclone-sync-{{
-        ((item.provider ~ ('-' ~ item.bucket if (item.bucket | default('') | length > 0) else ''))
-        | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-+|-+$', ''))
-      }}.service
+    dest: "/etc/systemd/system/rclone-sync-{{ item.name }}.service"
     mode: "0644"
     owner: root
     group: root
-  loop: "{{ rclone_jobs | default([]) }}"
+  loop: "{{ rclone_jobs_resolved | default([]) }}"
   loop_control:
-    index_var: rclone_job_idx
-    label: "{{ item.provider }}:{{ item.bucket | default('') }}"
+    label: "{{ item.name }}"
 
-- name: "Deploy rclone systemd timer unit: {{ item.provider }}"
+- name: Deploy rclone systemd timer unit
   ansible.builtin.template:
     src: rclone-sync.timer.j2
-    dest: >-
-      /etc/systemd/system/rclone-sync-{{
-        ((item.provider ~ ('-' ~ item.bucket if (item.bucket | default('') | length > 0) else ''))
-        | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-+|-+$', ''))
-      }}.timer
+    dest: "/etc/systemd/system/rclone-sync-{{ item.name }}.timer"
     mode: "0644"
     owner: root
     group: root
-  loop: "{{ rclone_jobs | default([]) }}"
+  loop: "{{ rclone_jobs_resolved | default([]) }}"
   loop_control:
-    index_var: rclone_job_idx
-    label: "{{ item.provider }}:{{ item.bucket | default('') }}"
+    label: "{{ item.name }}"
 
-- name: "Enable and start rclone systemd timer: {{ item.provider }}"
+- name: Clean up orphaned rclone systemd units
+  ansible.builtin.import_tasks: cleanup.yml
+
+- name: Enable and start rclone systemd timer
   ansible.builtin.systemd_service:
-    name: >-
-      rclone-sync-{{
-        ((item.provider ~ ('-' ~ item.bucket if (item.bucket | default('') | length > 0) else ''))
-        | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-+|-+$', ''))
-      }}.timer
+    name: "rclone-sync-{{ item.name }}.timer"
     daemon_reload: true
     enabled: true
     state: started
-  loop: "{{ rclone_jobs | default([]) }}"
+  loop: "{{ rclone_jobs_resolved | default([]) }}"
   loop_control:
-    label: "{{ item.provider }}:{{ item.bucket | default('') }}"
+    label: "{{ item.name }}"

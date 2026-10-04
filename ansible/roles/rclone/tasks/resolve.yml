@@ -1,0 +1,33 @@
+---
+# Normalizes rclone_jobs into rclone_jobs_resolved:
+#   - mount_path: destination.mount without trailing slashes
+#   - target_dir: <mount_path>/<destination.path> when destination.path is set,
+#                 otherwise <mount_path>/<source.provider>[/<source.path>]
+#   - index:      position in rclone_jobs (used for default timer staggering)
+- name: Reset resolved rclone jobs
+  ansible.builtin.set_fact:
+    rclone_jobs_resolved: []
+
+- name: Resolve rclone job mount paths and target directories
+  ansible.builtin.set_fact:
+    rclone_jobs_resolved: >-
+      {{
+        rclone_jobs_resolved + [item | combine({
+          'index': rclone_job_idx,
+          'mount_path': rclone_job_mount_path,
+          'target_dir': rclone_job_mount_path ~ '/' ~ rclone_job_subdir
+        })]
+      }}
+  vars:
+    rclone_job_mount_path: "{{ item.destination.mount | regex_replace('/+$', '') }}"
+    rclone_job_source_path: "{{ item.source.path | default('') | regex_replace('^/+|/+$', '') }}"
+    rclone_job_subdir: >-
+      {{
+        (item.destination.path | regex_replace('^/+|/+$', ''))
+        if (item.destination.path is defined)
+        else (item.source.provider ~ (('/' ~ rclone_job_source_path) if (rclone_job_source_path | length > 0) else ''))
+      }}
+  loop: "{{ rclone_jobs | default([]) }}"
+  loop_control:
+    index_var: rclone_job_idx
+    label: "{{ item.name }}"

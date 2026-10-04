@@ -1,0 +1,11 @@
+---
+# Internal constants for the rclone role (not meant to be overridden by inventories)
+rclone_job_allowed_keys:
+  - name
+  - source
+  - destination
+  - hour
+  - minute
+  - filters
+  - extra_args
+rclone_validation_prefix: "rclone_jobs validation failed:"

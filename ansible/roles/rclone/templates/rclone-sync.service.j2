@@ -1,32 +1,29 @@
 # Managed by Ansible - do not edit manually
-{% set rclone_job_slug = ((item.provider ~ ('-' ~ item.bucket if (item.bucket | default('') | length > 0) else '')) | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-+|-+$', '')) %}
-{% set mount_unit = (item.destination | regex_replace('^/+', '') | regex_replace('/+$', '') | replace('/', '-')) ~ '.mount' %}
-{% set target_dir = item.destination ~ '/' ~ item.provider ~ ('/' ~ item.bucket if (item.bucket | default('') | length > 0) else '') %}
 [Unit]
-Description=Rclone sync for {{ item.provider }}{{ ':' ~ item.bucket if (item.bucket | default('') | length > 0) else ':' }} to {{ target_dir }}
-After=network-online.target {{ mount_unit }}
+Description=Rclone sync for {{ item.name }} ({{ item.source.provider }}{{ ':' ~ item.source.path if (item.source.path | default('') | length > 0) else ':' }} to {{ item.target_dir }})
+After=network-online.target {{ item.mount_unit | default(rclone_mount_dict[item.mount_path]) }}
 Wants=network-online.target
-Requisite={{ mount_unit }}
-PartOf={{ mount_unit }}
-AssertPathIsMountPoint={{ item.destination }}
+Requisite={{ item.mount_unit | default(rclone_mount_dict[item.mount_path]) }}
+PartOf={{ item.mount_unit | default(rclone_mount_dict[item.mount_path]) }}
+AssertPathIsMountPoint={{ item.mount_path }}
 
 [Service]
 Type=oneshot
 User={{ ansible_user }}
 Group={{ ansible_user }}
-SyslogIdentifier=rclone-sync-{{ rclone_job_slug }}
+SyslogIdentifier=rclone-sync-{{ item.name }}
 
 # Security & filesystem sandboxing
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths={{ item.destination }} /home/{{ ansible_user }}/.config/rclone
+ReadWritePaths={{ item.mount_path }} /home/{{ ansible_user }}/.config/rclone
 
 # Pre-flight checks: config exists, strict 0600 mode, and target directory exists
 ExecStartPre=/usr/bin/test -s /home/{{ ansible_user }}/.config/rclone/rclone.conf
 ExecStartPre=/usr/bin/chmod 0600 /home/{{ ansible_user }}/.config/rclone/rclone.conf
-ExecStartPre=/usr/bin/mkdir -p "{{ target_dir }}"
+ExecStartPre=/usr/bin/mkdir -p "{{ item.target_dir }}"
 
 ExecStart=/usr/bin/rclone sync \
     --config /home/{{ ansible_user }}/.config/rclone/rclone.conf \
@@ -34,7 +31,6 @@ ExecStart=/usr/bin/rclone sync \
     --stats-one-line \
     --stats 1m \
     --modify-window 1s \
-    --user-agent "ISV|rclone.org|rclone/v1.67.0" \
     --transfers 2 \
     --checkers 4 \
     --buffer-size 32M \
@@ -49,5 +45,8 @@ ExecStart=/usr/bin/rclone sync \
 {% for filter_rule in item.filters | default([]) %}
     --filter "{{ filter_rule }}" \
 {% endfor %}
-    "{{ item.provider }}:{{ item.bucket | default('') }}" \
-    "{{ target_dir }}"
+{% for extra_arg in item.extra_args | default([]) %}
+    "{{ extra_arg }}" \
+{% endfor %}
+    "{{ item.source.provider }}:{{ item.source.path | default('') }}" \
+    "{{ item.target_dir }}"

@@ -2,6 +2,17 @@
 - name: Configure snapshot and cloud backup services
   hosts: crypto
   become: true
+  pre_tasks:
+    - name: Validate rclone jobs before any deployment
+      ansible.builtin.include_role:
+        name: rclone
+        tasks_from: validate
   roles:
-    - snapshot
-    - rclone
+    - role: snapshot
+      tags:
+        - snapshot
+        - backup
+    - role: rclone
+      tags:
+        - rclone
+        - backup

@@ -48,3 +48,23 @@
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
     mode: "0644"
+
+# Pre-create remote temporary directories to silence Ansible warning
+# "Authentication or permission failure... remote_tmp did not exist and was created with a mode of 0700"
+- name: Ensure Ansible remote temporary directory exists for root
+  become: true
+  ansible.builtin.file:
+    path: /root/.ansible/tmp
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Ensure Ansible remote temporary directory exists for user
+  become: true
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/.ansible/tmp"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0700"

@@ -51,7 +51,7 @@ flowchart TD
    - Executes [`scripts/test-lab.sh`](../scripts/test-lab.sh) on `runner.delarche.fr` against the lab VM (`debian.delarche.fr`):
      - `system-and-ufw`: `system.yml` idempotence (`changed=0`) and UFW firewall drift remediation (`TC-SYS-01`, `TC-FW-03`).
      - `storage-wipe-and-unlock`: Full LUKS2 + Btrfs RAID1 reset (`storage-wipe-and-reset.yml -e confirm_wipe=yes`) and `storage-unlock.yml` idempotence (`TC-STO-01..02`).
-     - `backup-and-sync`: `backup.yml` idempotence (`changed=0`), live `OneDrive:/Share/50ans` sync (`rclone-sync-onedrive-share-50ans.service`, verifying all 8 photos), and live Btrfs snapshot creation (`btrfs-snapshot-data.service`) (`TC-BAK-01..03`).
+     - `backup-and-sync`: `backup.yml` idempotence (`changed=0`), live `OneDrive:/Share/50ans` sync (`rclone-sync-onedrive-share-50ans.service` and multi-destination `rclone-sync-onedrive-share-50ans-backup.service`, verifying all 8 photos), live Btrfs snapshot creation (`btrfs-snapshot-data.service` and `btrfs-snapshot-backup.service`), negative validation test suite, and automatic orphan unit purge (`TC-BAK-01..07`).
      - `corner-cases-and-raid1`: Unmounted 0ms refusal (`TC-ADV-01`), kernel mount-namespace EROFS sandbox probe (`TC-ADV-03`), LUKS2 header corruption & restore (`TC-ADV-06`), and simulated disk wipe + auto-detected RAID1 rebuild + scrub (`TC-ADV-05` / `TC-STO-04`).
      - `status`: Complete read-only diagnostic report (`status.yml` / `TC-BAK-04`).
 

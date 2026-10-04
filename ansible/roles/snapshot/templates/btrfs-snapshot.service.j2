@@ -1,6 +1,6 @@
 # Managed by Ansible - do not edit manually
-{% set src_mount_unit = (item.source | regex_replace('^/+', '') | regex_replace('/+$', '') | replace('/', '-')) ~ '.mount' %}
-{% set dst_mount_unit = (item.destination | regex_replace('^/+', '') | regex_replace('/+$', '') | replace('/', '-')) ~ '.mount' %}
+{% set src_mount_unit = snapshot_mount_units[item.source | regex_replace('/+$', '')] %}
+{% set dst_mount_unit = snapshot_mount_units[item.destination | regex_replace('/+$', '')] %}
 {% set snap_slug = item.name | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-+|-+$', '') %}
 [Unit]
 Description=Btrfs read-only snapshot and rotation for {{ item.name }} ({{ item.source }} -> {{ item.destination }})

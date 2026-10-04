@@ -23,8 +23,8 @@ flowchart LR
 | **`TC-SYS`** | System Baseline, Locales, Time & SSH | `bootstrap.yml`, `system.yml`, `apt`, `base`, `locales`, `ntp`, `sshd`, `sudo`, `vim`, `htop` | 4 |
 | **`TC-FW`** | Dual-Stack Firewall (`ufw`) | `system.yml`, `ufw` role, `iptables` / `ip6tables` kernel chains | 3 |
 | **`TC-STO`** | Encrypted Storage & Btrfs RAID1 | `storage-wipe-and-reset.yml`, `storage-unlock.yml`, `storage-replace.yml`, `crypto` role | 4 |
-| **`TC-BAK`** | Cloud Sync & Btrfs Snapshots (`systemd`) | `backup.yml`, `status.yml`, `rclone` role, `snapshot` role | 4 |
-| **`TC-SMB`** | Samba File Sharing & Shadow Copies | `system.yml`, `status.yml`, `samba` role, `vfs_shadow_copy2`, `smbclient` | 6 |
+| **`TC-BAK`** | Cloud Sync & Btrfs Snapshots (`systemd`) | `backup.yml`, `status.yml`, `rclone` role, `snapshot` role | 7 |
+| **`TC-SMB`** | Samba File Sharing & Shadow Copies | `system.yml`, `status.yml`, `samba` role, `vfs_shadow_copy2`, `smbclient` | 7 |
 | **`TC-ADV`** | Advanced Corner Cases & Chaos Sequences | Unmounted pool guards, live unmount kill-switch, kernel sandboxing, ISO-week pruning, header recovery | 6 |
 
 ---
@@ -182,8 +182,8 @@ flowchart LR
   ```
 - **Expected Result**:
   - `/var/backups/luks/luks-header-{data,backup}-{0,1}.img` present with mode `0400`.
-  - `btrfs filesystem df /home/olivier/data/sync` and `/home/olivier/backup` show `Data, RAID1` and `Metadata, RAID1`.
-  - `/home/olivier/data/sync`, `/home/olivier/data/snapshots`, and `/home/olivier/backup` are mounted with `rw,async,compress=zstd:1,noatime,user_subvol_rm_allowed`.
+  - `btrfs filesystem df /home/olivier/data/sync` and `/home/olivier/backup/sync` show `Data, RAID1` and `Metadata, RAID1`.
+  - `/home/olivier/data/sync`, `/home/olivier/data/snapshots`, `/home/olivier/backup/sync`, and `/home/olivier/backup/snapshots` are mounted with `rw,async,compress=zstd:1,noatime,user_subvol_rm_allowed`.
 
 ---
 
@@ -204,7 +204,7 @@ flowchart LR
 - **Preconditions**: Pools unlocked and mounted.
 - **Commands**:
   ```bash
-  ssh olivier@debian.delarche.fr "echo 'REBOOT_SURVIVAL_TEST' > /home/olivier/data/sync/reboot_test.txt && sync && sudo umount /home/olivier/data/sync /home/olivier/data/snapshots /home/olivier/backup && sudo cryptsetup luksClose data-0 && sudo cryptsetup luksClose data-1 && sudo cryptsetup luksClose backup-0 && sudo cryptsetup luksClose backup-1"
+  ssh olivier@debian.delarche.fr "echo 'REBOOT_SURVIVAL_TEST' > /home/olivier/data/sync/reboot_test.txt && sync && sudo umount /home/olivier/data/sync /home/olivier/data/snapshots /home/olivier/backup/sync /home/olivier/backup/snapshots && sudo cryptsetup luksClose data-0 && sudo cryptsetup luksClose data-1 && sudo cryptsetup luksClose backup-0 && sudo cryptsetup luksClose backup-1"
   ANSIBLE_HOME=/tmp/.ansible uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags crypto
   ANSIBLE_HOME=/tmp/.ansible uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-unlock.yml
   ssh olivier@debian.delarche.fr "cat /home/olivier/data/sync/reboot_test.txt && rm -f /home/olivier/data/sync/reboot_test.txt"
@@ -281,7 +281,7 @@ flowchart LR
 ---
 
 ### `TC-BAK-04` — Observability & Status Reporting (`status.yml`)
-- **Objective**: Verify that `status.yml --tags snapshot,rclone` reports `rclone` version, `rclone.conf` mode `0600`, configured vs missing providers (`OneDrive: Configured`, `S3: MISSING`), active systemd timers, and recent `journald` logs.
+- **Objective**: Verify that `status.yml --tags snapshot,rclone` reports `rclone` version, `rclone.conf` mode `0600`, configured vs missing providers (`OneDrive: Configured`, `S3: MISSING`), configured sync jobs, active systemd timers, and recent `journald` logs.
 - **Preconditions**: `backup.yml` applied.
 - **Commands**:
   ```bash
@@ -289,6 +289,88 @@ flowchart LR
   ```
 - **Expected Result**:
   - Displays `OneDrive: Configured` and `S3: MISSING (run rclone config)`, `btrfs-snapshot-data.timer`, `rclone-sync-*.timer`, and `journalctl` transfer/snapshot logs.
+
+---
+
+### `TC-BAK-05` — Multi-Destination Cloud Sync & Dynamic Mount Unit Resolution
+- **Objective**: Trigger `rclone-sync-onedrive-share-50ans-backup.service` (syncing `OneDrive:Share/50ans` to `/home/olivier/backup/sync/onedrive/50ans`) and verify the 8 reference files, verify that `systemd-escape` resolves `home-olivier-backup-sync.mount`, and verify that `btrfs-snapshot-backup.service` creates a valid read-only snapshot in `/home/olivier/backup/snapshots/`.
+- **Preconditions**: `backup.yml` applied and pools mounted.
+- **Commands**:
+  ```bash
+  ssh olivier@debian.delarche.fr "set -e
+  sudo systemctl start rclone-sync-onedrive-share-50ans-backup.service
+  count=\$(rclone ls /home/olivier/backup/sync/onedrive/50ans | wc -l | tr -d ' ')
+  test \"\${count}\" -eq 8
+  unit=\$(systemctl show -p Requisite --value rclone-sync-onedrive-share-50ans-backup.service)
+  test \"\${unit}\" = 'home-olivier-backup-sync.mount'
+  systemctl is-active \"\${unit}\" | grep -q 'active'
+  sudo systemctl start btrfs-snapshot-backup.service
+  SNAP=\$(ls -td /home/olivier/backup/snapshots/20* | head -n 1)
+  sudo btrfs property get \"\$SNAP\" ro | grep -q 'ro=true'
+  rclone ls \"\$SNAP/onedrive/50ans\" | wc -l | tr -d ' ' | grep -q '^8$'
+  "
+  ```
+- **Expected Result**:
+  - Exactly 8 reference files synced to the secondary pool under `/home/olivier/backup/sync/onedrive/50ans`.
+  - `systemctl show -p Requisite` matches `home-olivier-backup-sync.mount`.
+  - Read-only snapshot created under `/home/olivier/backup/snapshots/` containing all 8 files.
+
+---
+
+### `TC-BAK-06` — Strict Schema & Overlapping Target Directory Rejection (Negative Suite)
+- **Objective**: Verify that `backup.yml` pre_tasks block invalid `rclone_jobs` definitions at the playbook threshold before touching systemd or filesystem state.
+- **Preconditions**: Lab inventory configured.
+- **Test Matrix**:
+  1. Duplicate job name.
+  2. Nested / overlapping target directories (`/home/olivier/data/sync/a` and `/home/olivier/data/sync/a/b`).
+  3. Absolute `destination.path` (`/test`).
+  4. Path traversal in `destination.path` (`../../etc`).
+  5. Invalid name regex (e.g. uppercase / underscores `bad_Name`).
+  6. Unknown/disallowed configuration keys.
+  7. Legacy flat schema (`provider:` / `bucket:` at root).
+  8. `destination.mount` not declared in `crypto_disks[*].subvolumes`.
+- **Expected Result**:
+  - Every invalid definition fails immediately with `fatal: [debian.delarche.fr]: FAILED! => ... rclone_jobs validation failed: ...`.
+  - No changes applied (`changed=0`).
+
+---
+
+### `TC-BAK-07` — Automatic Cleanup of Orphaned Systemd Units
+- **Objective**: Verify that creating an unmanaged systemd unit file (`rclone-sync-orphan-test.{service,timer}`) and running `backup.yml` automatically stops, disables, and deletes the orphan unit without affecting declared timers.
+- **Preconditions**: `backup.yml` applied.
+- **Commands**:
+  ```bash
+  ssh olivier@debian.delarche.fr "set -e
+  cat << 'UNIT' | sudo tee /etc/systemd/system/rclone-sync-orphan-test.service >/dev/null
+  [Unit]
+  Description=Orphan test service
+  [Service]
+  Type=oneshot
+  ExecStart=/bin/true
+  UNIT
+  cat << 'UNIT' | sudo tee /etc/systemd/system/rclone-sync-orphan-test.timer >/dev/null
+  [Unit]
+  Description=Orphan test timer
+  [Timer]
+  OnCalendar=*-*-* 04:00:00
+  Unit=rclone-sync-orphan-test.service
+  [Install]
+  WantedBy=timers.target
+  UNIT
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now rclone-sync-orphan-test.timer
+  "
+  ANSIBLE_HOME=/tmp/.ansible uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/backup.yml
+  ssh olivier@debian.delarche.fr "set -e
+  test ! -f /etc/systemd/system/rclone-sync-orphan-test.service
+  test ! -f /etc/systemd/system/rclone-sync-orphan-test.timer
+  ! systemctl is-active rclone-sync-orphan-test.timer >/dev/null 2>&1
+  "
+  ```
+- **Expected Result**:
+  - Orphan unit files are deleted from `/etc/systemd/system/`.
+  - Orphan timer is stopped and disabled.
+  - All declared rclone timers remain active.
 
 ---
 
@@ -482,14 +564,14 @@ flowchart LR
 - **Commands**:
   ```bash
   ssh olivier@debian.delarche.fr "set -e
-  echo 'RAID1_DEGRADED_RECOVERY_OK' > /home/olivier/backup/corner_case_test.txt && sync
-  sudo umount /home/olivier/backup
+  echo 'RAID1_DEGRADED_RECOVERY_OK' > /home/olivier/backup/sync/corner_case_test.txt && sync
+  sudo umount /home/olivier/backup/sync /home/olivier/backup/snapshots
   sudo cryptsetup luksClose backup-1
-  sudo wipefs -a /dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK
-  sudo dd if=/dev/zero of=/dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK bs=1M count=16 status=none
+  sudo wipefs -a /dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3
+  sudo dd if=/dev/zero of=/dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3 bs=1M count=16 status=none
   "
   ANSIBLE_HOME=/tmp/.ansible uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-replace.yml -e confirm_replace=yes
-  ssh olivier@debian.delarche.fr "cat /home/olivier/backup/corner_case_test.txt && sudo btrfs scrub start -B /home/olivier/backup && rm -f /home/olivier/backup/corner_case_test.txt"
+  ssh olivier@debian.delarche.fr "cat /home/olivier/backup/sync/corner_case_test.txt && sudo btrfs scrub start -B /home/olivier/backup/sync && rm -f /home/olivier/backup/sync/corner_case_test.txt"
   ```
 - **Expected Result**:
   - `storage-replace.yml` auto-detects `Pool: backup, Member Index: 1`, formats LUKS, runs `btrfs replace start` (`0 write errs, 0 uncorr. read errs`), and rebalances to RAID1.
@@ -502,20 +584,20 @@ flowchart LR
 - **Commands**:
   ```bash
   ssh olivier@debian.delarche.fr "set -e
-  echo 'HEADER_RESTORE_OK' > /home/olivier/backup/header_test.txt && sync
-  sudo umount /home/olivier/backup
+  echo 'HEADER_RESTORE_OK' > /home/olivier/backup/sync/header_test.txt && sync
+  sudo umount /home/olivier/backup/sync /home/olivier/backup/snapshots
   sudo cryptsetup luksClose backup-1
-  sudo dd if=/dev/zero of=/dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK bs=1M count=2 conv=notrunc status=none
-  ! sudo cryptsetup isLuks /dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK && echo CORRUPTION_CONFIRMED
-  sudo cryptsetup luksHeaderRestore /dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK --header-backup-file /var/backups/luks/luks-header-backup-1.img --batch-mode
-  sudo cryptsetup isLuks /dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK && echo HEADER_RESTORED_OK
+  sudo dd if=/dev/zero of=/dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3 bs=1M count=2 conv=notrunc status=none
+  ! sudo cryptsetup isLuks /dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3 && echo CORRUPTION_CONFIRMED
+  sudo cryptsetup luksHeaderRestore /dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3 --header-backup-file /var/backups/luks/luks-header-backup-1.img --batch-mode
+  sudo cryptsetup isLuks /dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3 && echo HEADER_RESTORED_OK
   "
   ANSIBLE_HOME=/tmp/.ansible uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-unlock.yml
-  ssh olivier@debian.delarche.fr "cat /home/olivier/backup/header_test.txt && sudo btrfs scrub start -B /home/olivier/backup && rm -f /home/olivier/backup/header_test.txt"
+  ssh olivier@debian.delarche.fr "cat /home/olivier/backup/sync/header_test.txt && sudo btrfs scrub start -B /home/olivier/backup/sync && rm -f /home/olivier/backup/sync/header_test.txt"
   ```
 - **Expected Result**:
   - `CORRUPTION_CONFIRMED` followed by `HEADER_RESTORED_OK`.
-  - `storage-unlock.yml` opens `backup-1` and mounts `/home/olivier/backup` cleanly.
+  - `storage-unlock.yml` opens `backup-1` and mounts `/home/olivier/backup/sync` cleanly.
   - `cat` outputs `HEADER_RESTORE_OK` and `btrfs scrub` reports `no errors found`.
 
 ---
@@ -528,7 +610,7 @@ Use this ordered checklist to execute a complete validation campaign on `debian.
 - [ ] **Step 2 — System Baseline & Hardening**: Run `TC-SYS-01` (`system.yml` twice, `changed=0` on 2nd run), `TC-SYS-02` (locales/keyboard), `TC-SYS-03` (NTP/leap seconds), and `TC-SYS-04` (multi-key SSH login).
 - [ ] **Step 3 — Dual-Stack Firewall (`ufw`)**: Run `TC-FW-01` (netfilter rules), `TC-FW-02` (live port 9999 probe), and `TC-FW-03` (`ufw disable` remediation).
 - [ ] **Step 4 — Storage Wipe, Unlock & Reboot Cycle**: Run `TC-STO-01` (`storage-wipe-and-reset.yml`), `TC-STO-02` (`storage-unlock.yml` idempotence), and `TC-STO-03` (full lock/unlock cycle).
-- [ ] **Step 5 — Cloud Sync & Btrfs Snapshots (`systemd`)**: Run `TC-BAK-01` (`backup.yml` twice), `TC-BAK-02` (`OneDrive:/Share/50ans` sync), `TC-BAK-03` (`btrfs-snapshot-data.service`), and `TC-BAK-04` (`status.yml`).
+- [ ] **Step 5 — Cloud Sync & Btrfs Snapshots (`systemd`)**: Run `TC-BAK-01` (`backup.yml` twice), `TC-BAK-02` (`OneDrive:/Share/50ans` sync), `TC-BAK-03` (`btrfs-snapshot-data.service`), `TC-BAK-04` (`status.yml`), `TC-BAK-05` (multi-destination sync & mount unit check), `TC-BAK-06` (negative validation suite), and `TC-BAK-07` (orphan unit cleanup).
 - [ ] **Step 6 — Samba File Sharing & Shadow Copies**: Run `TC-SMB-01` (service health), `TC-SMB-02` (authenticated SMB3 listing), `TC-SMB-03` (shadow copies mapping), `TC-SMB-04` (read-only rejection), `TC-SMB-06` (`system.yml --tags samba` idempotence), and `TC-SMB-07` (SMB1 rejection).
 - [ ] **Step 7 — Advanced Corner Cases & Chaos**: Run `TC-ADV-01` (unmounted 0ms refusal), `TC-ADV-02` (`PartOf=` unmount kill-switch), `TC-ADV-03` (EROFS sandbox probe), `TC-ADV-04` (ISO-week snapshot pruning), `TC-ADV-05` (wiped disk auto-detected RAID1 rebuild + scrub), and `TC-ADV-06` (LUKS2 header corruption & restore).
 
