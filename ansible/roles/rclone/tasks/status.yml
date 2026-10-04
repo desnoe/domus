@@ -19,6 +19,9 @@
   changed_when: false
   failed_when: false
 
+- name: Resolve rclone jobs for status display
+  ansible.builtin.import_tasks: resolve.yml
+
 - name: Query rclone systemd timers  # noqa: command-instead-of-module
   ansible.builtin.command:
     cmd: "systemctl list-timers --all --no-pager 'rclone-sync-*'"
@@ -44,7 +47,7 @@
     rclone_required_providers: >-
       {{
         (rclone_jobs | default([]))
-        | map(attribute='provider')
+        | map(attribute='source.provider')
         | unique
         | list
       }}
@@ -61,6 +64,10 @@
       Required providers status:
       {% for prov in rclone_required_providers %}
         - {{ prov }}: {{ 'Configured' if prov in rclone_configured_remotes else 'MISSING (run rclone config)' }}
+      {% endfor %}
+      Configured sync jobs:
+      {% for job in rclone_jobs_resolved | default([]) %}
+        - {{ job.name }}: {{ job.source.provider }}:{{ job.source.path | default('') }} -> {{ job.target_dir }}
       {% endfor %}
       -------------------------------------------------------
       Systemd Timers:

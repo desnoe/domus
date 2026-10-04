@@ -16,7 +16,44 @@
     owner: "{{ snapshot_user }}"
     group: "{{ snapshot_user }}"
 
-- name: "Deploy Btrfs snapshot systemd service unit: {{ item.name }}"
+- name: Collect normalized snapshot mount paths
+  ansible.builtin.set_fact:
+    snapshot_normalized_mount_paths: >-
+      {{
+        ((snapshot_jobs | default([]) | map(attribute='source') | list) +
+         (snapshot_jobs | default([]) | map(attribute='destination') | list))
+        | map('regex_replace', '/+$', '')
+        | unique
+        | sort
+        | list
+      }}
+
+- name: Query systemd mount unit names for snapshot mount paths
+  when: (snapshot_normalized_mount_paths | default([])) | length > 0
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['systemd-escape', '--path', '--suffix=mount'] +
+        snapshot_normalized_mount_paths
+      }}
+  register: snapshot_mount_units_cmd
+  changed_when: false
+  check_mode: false
+
+- name: Map systemd mount unit names for snapshots
+  ansible.builtin.set_fact:
+    snapshot_mount_units: >-
+      {{
+        {}
+        if (snapshot_normalized_mount_paths | length == 0)
+        else
+        dict(
+          snapshot_normalized_mount_paths
+          | zip(snapshot_mount_units_cmd.stdout | split)
+        )
+      }}
+
+- name: Deploy Btrfs snapshot systemd service unit
   ansible.builtin.template:
     src: btrfs-snapshot.service.j2
     dest: >-
@@ -30,7 +67,7 @@
   loop_control:
     label: "{{ item.name }}"
 
-- name: "Deploy Btrfs snapshot systemd timer unit: {{ item.name }}"
+- name: Deploy Btrfs snapshot systemd timer unit
   ansible.builtin.template:
     src: btrfs-snapshot.timer.j2
     dest: >-
@@ -44,7 +81,7 @@
   loop_control:
     label: "{{ item.name }}"
 
-- name: "Enable and start Btrfs snapshot systemd timer: {{ item.name }}"
+- name: Enable and start Btrfs snapshot systemd timer
   ansible.builtin.systemd_service:
     name: >-
       btrfs-snapshot-{{

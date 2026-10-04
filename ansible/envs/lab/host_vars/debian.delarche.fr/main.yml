@@ -2,36 +2,64 @@
 crypto_disks:
   - name: data
     devices:
-      - /dev/sdb
-      - /dev/sdc
+      - /dev/disk/by-id/ata-VBOX_HARDDISK_VB4bf9f137-2a754221
+      - /dev/disk/by-id/ata-VBOX_HARDDISK_VB47326378-f9bc769e
     subvolumes:
       - "/home/{{ ansible_user }}/data/sync"
       - "/home/{{ ansible_user }}/data/snapshots"
   - name: backup
     devices:
-      - /dev/sdd
-      - /dev/sde
+      - /dev/disk/by-id/ata-VBOX_HARDDISK_VB3a4d115e-5d14d18f
+      - /dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3
     subvolumes:
-      - "/home/{{ ansible_user }}/backup"
+      - "/home/{{ ansible_user }}/backup/sync"
+      - "/home/{{ ansible_user }}/backup/snapshots"
 
 snapshot_jobs:
   - name: data
     source: "/home/{{ ansible_user }}/data/sync"
     destination: "/home/{{ ansible_user }}/data/snapshots"
+  - name: backup
+    source: "/home/{{ ansible_user }}/backup/sync"
+    destination: "/home/{{ ansible_user }}/backup/snapshots"
 
 rclone_jobs:
-  - provider: OneDrive
-    bucket: Share/50ans
-    destination: "/home/{{ ansible_user }}/data/sync"
-  - provider: S3
-    bucket: www.albatross-networks.com
-    destination: "/home/{{ ansible_user }}/data/sync"
-  - provider: S3
-    bucket: delarche-images
-    destination: "/home/{{ ansible_user }}/data/sync"
+  - name: onedrive-share-50ans
+    source:
+      provider: OneDrive
+      path: Share/50ans
+    destination:
+      mount: "/home/{{ ansible_user }}/data/sync"
+    extra_args:
+      - '--user-agent="ISV|rclone.org|rclone/v1.67.0"'
+  - name: onedrive-share-50ans-backup
+    source:
+      provider: OneDrive
+      path: Share/50ans
+    destination:
+      mount: "/home/{{ ansible_user }}/backup/sync"
+      path: onedrive/50ans
+    extra_args:
+      - '--user-agent="ISV|rclone.org|rclone/v1.67.0"'
+  - name: s3-www-albatross-networks-com
+    source:
+      provider: S3
+      path: www.albatross-networks.com
+    destination:
+      mount: "/home/{{ ansible_user }}/data/sync"
+  - name: s3-delarche-images
+    source:
+      provider: S3
+      path: delarche-images
+    destination:
+      mount: "/home/{{ ansible_user }}/data/sync"
 
 samba_shares:
   - name: data
     path: "/home/{{ ansible_user }}/data/sync"
     snapdir: "/home/{{ ansible_user }}/data/snapshots"
     comment: "Btrfs data with Previous Versions"
+  - name: backup
+    path: "/home/{{ ansible_user }}/backup/sync"
+    snapdir: "/home/{{ ansible_user }}/backup/snapshots"
+    comment: "Btrfs backup with Previous Versions"

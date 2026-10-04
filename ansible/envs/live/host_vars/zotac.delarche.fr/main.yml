@@ -2,18 +2,45 @@
 crypto_disks:
   - name: data
     devices:
-      - /dev/sda
+      - /dev/disk/by-id/ata-Samsung_SSD_860_EVO_2TB_S3YVNB0KB16855X
     subvolumes:
       - "/home/{{ ansible_user }}/data/sync"
       - "/home/{{ ansible_user }}/data/snapshots"
+  # Btrfs RAID1 over 2 TB + 2 TB + 8 TB => ~4 TB usable (bounded by largest member).
+  # ST2000DL003 drives date from 2011: monitor SMART.
+  - name: backup
+    devices:
+      - /dev/disk/by-id/ata-ST2000DL003-9VT166_5YD49469
+      - /dev/disk/by-id/ata-ST2000DL003-9VT166_5YD4997K
+      - /dev/disk/by-id/ata-TOSHIBA_HDWG180_7160A0A6FBEG
+    subvolumes:
+      - "/home/{{ ansible_user }}/backup/sync"
+      - "/home/{{ ansible_user }}/backup/snapshots"
 
 snapshot_jobs:
   - name: data
     source: "/home/{{ ansible_user }}/data/sync"
     destination: "/home/{{ ansible_user }}/data/snapshots"
+  - name: backup
+    source: "/home/{{ ansible_user }}/backup/sync"
+    destination: "/home/{{ ansible_user }}/backup/snapshots"
 
 samba_shares:
   - name: data
     path: "/home/{{ ansible_user }}/data/sync"
     snapdir: "/home/{{ ansible_user }}/data/snapshots"
-    comment: "Btrfs data with Previous Versions"
+    comment: "Zotac DATA"
+  - name: backup
+    path: "/home/{{ ansible_user }}/backup/sync"
+    snapdir: "/home/{{ ansible_user }}/backup/snapshots"
+    comment: "Zotac BACKUP"
+
+rclone_jobs:
+  - name: googledrive
+    source:
+      provider: GoogleDrive
+    destination:
+      mount: "/home/{{ ansible_user }}/backup/sync"
+      path: "googledrive/mydrive"
+    extra_args:
+      - "--drive-skip-gdocs"

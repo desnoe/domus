@@ -13,15 +13,25 @@ snapshot_jobs:
     destination: "/home/{{ ansible_user }}/data/snapshots"
 
 rclone_jobs:
-  - provider: onedrive
-    bucket: ""
-    destination: "/home/{{ ansible_user }}/data/sync"
-  - provider: S3
-    bucket: www.albatross-networks.com
-    destination: "/home/{{ ansible_user }}/data/sync"
-  - provider: S3
-    bucket: delarche-images
-    destination: "/home/{{ ansible_user }}/data/sync"
+  - name: onedrive
+    source:
+      provider: onedrive
+    destination:
+      mount: "/home/{{ ansible_user }}/data/sync"
+    extra_args:
+      - '--user-agent="ISV|rclone.org|rclone/v1.67.0"'
+  - name: s3-www-albatross-networks-com
+    source:
+      provider: S3
+      path: www.albatross-networks.com
+    destination:
+      mount: "/home/{{ ansible_user }}/data/sync"
+  - name: s3-delarche-images
+    source:
+      provider: S3
+      path: delarche-images
+    destination:
+      mount: "/home/{{ ansible_user }}/data/sync"
 
 samba_shares:
   - name: data

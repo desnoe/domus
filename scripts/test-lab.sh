@@ -30,6 +30,28 @@ assert_playbook_idempotent() {
     printf '%s\n' "${output}" | grep -q "changed=0"
 }
 
+assert_rclone_validation_fails() {
+    local case_label="$1"
+    local invalid_json="$2"
+    local output
+    local exit_code=0
+
+    echo "Running TC-BAK-06 negative case: ${case_label}..."
+    output="$(uv run ansible-playbook -i "${LAB_INVENTORY}" ansible/backup.yml -e "${invalid_json}" 2>&1)" || exit_code=$?
+
+    if [[ "${exit_code}" -eq 0 ]]; then
+        echo "ERROR: Expected backup.yml to fail for case '${case_label}', but it succeeded." >&2
+        printf '%s\n' "${output}" >&2
+        return 1
+    fi
+
+    if ! printf '%s\n' "${output}" | grep -q "rclone_jobs validation failed:"; then
+        echo "ERROR: Expected 'rclone_jobs validation failed:' in output for case '${case_label}'." >&2
+        printf '%s\n' "${output}" >&2
+        return 1
+    fi
+}
+
 step_check_prereqs() {
     if [[ -n "${VAULT_SECRET:-}" ]] && [[ ! -s "${HOME}/.ansible_vault_pass" ]]; then
         printf '%s\n' "${VAULT_SECRET}" > "${HOME}/.ansible_vault_pass"
@@ -74,14 +96,80 @@ step_storage_wipe_and_unlock() {
 }
 
 step_backup_and_sync() {
+    # TC-BAK-01: Deployment & Idempotence
     uv run ansible-playbook -i "${LAB_INVENTORY}" ansible/backup.yml
     assert_playbook_idempotent ansible/backup.yml
 
+    # TC-BAK-02 & TC-BAK-03: Primary pool sync & snapshot
     run_remote << 'EOF'
 sudo systemctl start rclone-sync-onedrive-share-50ans.service
 count="$(rclone ls /home/olivier/data/sync/OneDrive/Share/50ans | wc -l | tr -d ' ')"
 test "${count}" -eq 8
 sudo systemctl start btrfs-snapshot-data.service
+EOF
+
+    # TC-BAK-05: Multi-destination sync, dynamic systemd-escape mount unit resolution & secondary snapshot
+    run_remote << 'EOF'
+sudo systemctl start rclone-sync-onedrive-share-50ans-backup.service
+count="$(rclone ls /home/olivier/backup/sync/onedrive/50ans | wc -l | tr -d ' ')"
+test "${count}" -eq 8
+req_unit="$(systemctl show -p Requisite --value rclone-sync-onedrive-share-50ans-backup.service)"
+test "${req_unit}" = "home-olivier-backup-sync.mount"
+systemctl is-active "${req_unit}" | grep -q "active"
+
+sudo systemctl start btrfs-snapshot-backup.service
+snap_dir="$(ls -td /home/olivier/backup/snapshots/20* | head -n 1)"
+sudo btrfs property get "${snap_dir}" ro | grep -q "ro=true"
+rclone ls "${snap_dir}/onedrive/50ans" | wc -l | tr -d ' ' | grep -q '^8$'
+EOF
+
+    # TC-BAK-06: Negative validation suite
+    assert_rclone_validation_fails "duplicate-name" \
+        '{"rclone_jobs": [{"name": "dup", "source": {"provider": "OneDrive"}, "destination": {"mount": "/home/olivier/data/sync", "path": "p1"}}, {"name": "dup", "source": {"provider": "OneDrive"}, "destination": {"mount": "/home/olivier/data/sync", "path": "p2"}}]}'
+    assert_rclone_validation_fails "overlapping-targets" \
+        '{"rclone_jobs": [{"name": "j1", "source": {"provider": "OneDrive"}, "destination": {"mount": "/home/olivier/data/sync", "path": "parent"}}, {"name": "j2", "source": {"provider": "OneDrive"}, "destination": {"mount": "/home/olivier/data/sync", "path": "parent/child"}}]}'
+    assert_rclone_validation_fails "absolute-dest-path" \
+        '{"rclone_jobs": [{"name": "j1", "source": {"provider": "OneDrive"}, "destination": {"mount": "/home/olivier/data/sync", "path": "/absolute"}}]}'
+    assert_rclone_validation_fails "traversal-dest-path" \
+        '{"rclone_jobs": [{"name": "j1", "source": {"provider": "OneDrive"}, "destination": {"mount": "/home/olivier/data/sync", "path": "../etc"}}]}'
+    assert_rclone_validation_fails "invalid-regex-name" \
+        '{"rclone_jobs": [{"name": "Bad_Name", "source": {"provider": "OneDrive"}, "destination": {"mount": "/home/olivier/data/sync", "path": "p1"}}]}'
+    assert_rclone_validation_fails "unknown-root-keys" \
+        '{"rclone_jobs": [{"name": "j1", "unknown_key": "val", "source": {"provider": "OneDrive"}, "destination": {"mount": "/home/olivier/data/sync", "path": "p1"}}]}'
+    assert_rclone_validation_fails "legacy-flat-schema" \
+        '{"rclone_jobs": [{"provider": "OneDrive", "bucket": "Share/50ans", "destination": "/home/olivier/data/sync"}]}'
+    assert_rclone_validation_fails "undeclared-subvolume" \
+        '{"rclone_jobs": [{"name": "j1", "source": {"provider": "OneDrive"}, "destination": {"mount": "/tmp", "path": "p1"}}]}'
+
+    # TC-BAK-07: Automatic cleanup of orphan units
+    run_remote << 'EOF'
+cat << 'UNIT' | sudo tee /etc/systemd/system/rclone-sync-orphan-test.service >/dev/null
+[Unit]
+Description=Orphan test service
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+UNIT
+cat << 'UNIT' | sudo tee /etc/systemd/system/rclone-sync-orphan-test.timer >/dev/null
+[Unit]
+Description=Orphan test timer
+[Timer]
+OnCalendar=*-*-* 04:00:00
+Unit=rclone-sync-orphan-test.service
+[Install]
+WantedBy=timers.target
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl enable --now rclone-sync-orphan-test.timer
+EOF
+
+    uv run ansible-playbook -i "${LAB_INVENTORY}" ansible/backup.yml
+
+    run_remote << 'EOF'
+test ! -f /etc/systemd/system/rclone-sync-orphan-test.service
+test ! -f /etc/systemd/system/rclone-sync-orphan-test.timer
+! systemctl is-active rclone-sync-orphan-test.timer >/dev/null 2>&1
+systemctl is-active rclone-sync-onedrive-share-50ans.timer | grep -q "active"
 EOF
 }
 
@@ -112,8 +200,13 @@ EOF
         ansible/envs/lab/host_vars/debian.delarche.fr/vault.yml \
         | grep '^samba_pass:' | sed 's/^samba_pass: *//' | tr -d '"')"
 
-    # TC-SMB-02: Connect and list share files
+    # TC-SMB-02: Connect and list share files (data and backup shares)
     smbclient "//${LAB_HOST}/data" \
+        -U "${LAB_USER}%${samba_pass}" \
+        --max-protocol=SMB3 \
+        -c "ls" | grep -q '\.'
+
+    smbclient "//${LAB_HOST}/backup" \
         -U "${LAB_USER}%${samba_pass}" \
         --max-protocol=SMB3 \
         -c "ls" | grep -q '\.'
@@ -131,7 +224,15 @@ EOF
         -U "${LAB_USER}%${samba_pass}" \
         --max-protocol=SMB3 \
         -c "put /dev/null test_write_must_fail" 2>&1; then
-        echo "ERROR: Expected write to fail on read-only share, but it succeeded" >&2
+        echo "ERROR: Expected write to fail on read-only data share, but it succeeded" >&2
+        exit 1
+    fi
+
+    if smbclient "//${LAB_HOST}/backup" \
+        -U "${LAB_USER}%${samba_pass}" \
+        --max-protocol=SMB3 \
+        -c "put /dev/null test_write_must_fail" 2>&1; then
+        echo "ERROR: Expected write to fail on read-only backup share, but it succeeded" >&2
         exit 1
     fi
 
@@ -147,13 +248,18 @@ EOF
 
 step_corner_cases_and_raid1() {
     run_remote << 'EOF'
-readonly BACKUP_DISK_1="/dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK"
+readonly BACKUP_DISK_1="/dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3"
 
 # TC-ADV-01: Unmounted 0ms refusal (Requisite= + AssertPathIsMountPoint=)
 sudo umount /home/olivier/data/sync
 ! sudo systemctl start rclone-sync-onedrive-share-50ans.service 2>&1
 ! sudo systemctl start btrfs-snapshot-data.service 2>&1
 sudo mount /home/olivier/data/sync
+
+sudo umount /home/olivier/backup/sync
+! sudo systemctl start rclone-sync-onedrive-share-50ans-backup.service 2>&1
+! sudo systemctl start btrfs-snapshot-backup.service 2>&1
+sudo mount /home/olivier/backup/sync
 
 # TC-ADV-03: Kernel mount-namespace EROFS sandbox probe
 sudo systemd-run --wait --pipe \
@@ -165,9 +271,9 @@ sudo systemd-run --wait --pipe \
     /bin/bash -c '! touch /home/olivier/data/sync/test_ro 2>/dev/null && ! touch /etc/test_ro 2>/dev/null && touch /home/olivier/data/snapshots/.rw_probe && rm -f /home/olivier/data/snapshots/.rw_probe'
 
 # TC-ADV-06: LUKS2 header corruption & restore from /var/backups/luks/
-echo "CI_SURVIVAL_OK" > /home/olivier/backup/ci_test.txt
+echo "CI_SURVIVAL_OK" > /home/olivier/backup/sync/ci_test.txt
 sync
-sudo umount /home/olivier/backup
+sudo umount /home/olivier/backup/sync /home/olivier/backup/snapshots
 sudo cryptsetup luksClose backup-1
 sudo dd if=/dev/zero of="${BACKUP_DISK_1}" bs=1M count=2 conv=notrunc status=none
 ! sudo cryptsetup isLuks "${BACKUP_DISK_1}"
@@ -179,10 +285,10 @@ EOF
     uv run ansible-playbook -i "${LAB_INVENTORY}" ansible/storage-unlock.yml
 
     run_remote << 'EOF'
-readonly BACKUP_DISK_1="/dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK"
+readonly BACKUP_DISK_1="/dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3"
 
 # TC-ADV-05 / TC-STO-04: Simulate complete disk replacement (wipefs + zero first 16 MiB)
-sudo umount /home/olivier/backup
+sudo umount /home/olivier/backup/sync /home/olivier/backup/snapshots
 sudo cryptsetup luksClose backup-1
 sudo wipefs -a "${BACKUP_DISK_1}"
 sudo dd if=/dev/zero of="${BACKUP_DISK_1}" bs=1M count=16 status=none
@@ -191,9 +297,9 @@ EOF
     uv run ansible-playbook -i "${LAB_INVENTORY}" ansible/storage-replace.yml -e confirm_replace=yes
 
     run_remote << 'EOF'
-grep -q "CI_SURVIVAL_OK" /home/olivier/backup/ci_test.txt
-sudo btrfs scrub start -B /home/olivier/backup
-rm -f /home/olivier/backup/ci_test.txt
+grep -q "CI_SURVIVAL_OK" /home/olivier/backup/sync/ci_test.txt
+sudo btrfs scrub start -B /home/olivier/backup/sync
+rm -f /home/olivier/backup/sync/ci_test.txt
 EOF
 }
 
@@ -209,7 +315,7 @@ Subcommands:
   check-prereqs            Verify Vault password, rclone.conf, and SSH/sudo access to debian.delarche.fr
   system-and-ufw           Verify system.yml idempotence and UFW drift remediation (TC-SYS-01, TC-FW-03)
   storage-wipe-and-unlock  Run storage-wipe-and-reset.yml and verify storage-unlock.yml idempotence (TC-STO-01..02)
-  backup-and-sync          Verify backup.yml idempotence, OneDrive:/Share/50ans sync, and Btrfs snapshot (TC-BAK-01..03)
+  backup-and-sync          Verify backup.yml idempotence, OneDrive sync (primary & secondary), snapshots, TC-BAK-05..07
   samba                    Deploy Samba, verify idempotence, SMB connectivity, shadow copies, and security (TC-SMB-01..07)
   corner-cases-and-raid1   Run TC-ADV-01..06 corner cases, LUKS header restore, and RAID1 disk replacement
   status                   Run full read-only health report via ansible/status.yml (TC-BAK-04)

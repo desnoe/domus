@@ -1,0 +1,46 @@
+---
+# Discovers already deployed rclone systemd units and cleanly purges any
+# orphan units (those no longer declared in rclone_jobs_resolved).
+- name: Find deployed rclone systemd units
+  ansible.builtin.find:
+    paths: /etc/systemd/system
+    patterns:
+      - "rclone-sync-*.service"
+      - "rclone-sync-*.timer"
+    file_type: file
+  register: rclone_deployed_units
+
+- name: Compute orphaned rclone systemd units
+  ansible.builtin.set_fact:
+    rclone_orphan_units: >-
+      {{
+        rclone_deployed_units.files
+        | map(attribute='path')
+        | map('basename')
+        | difference(
+            rclone_jobs_resolved
+            | map(attribute='name')
+            | product(['.timer', '.service'])
+            | map('join')
+            | map('regex_replace', '^', 'rclone-sync-')
+          )
+        | sort(reverse=true)
+      }}
+
+- name: Stop and disable orphaned rclone systemd units
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop: "{{ rclone_orphan_units | default([]) }}"
+
+- name: Remove orphaned rclone systemd unit files
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}"
+    state: absent
+  loop: "{{ rclone_orphan_units | default([]) }}"
+
+- name: Reload systemd after orphan cleanup
+  when: (rclone_orphan_units | default([])) | length > 0
+  ansible.builtin.systemd_service:
+    daemon_reload: true
