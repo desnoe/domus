@@ -1,0 +1,101 @@
+---
+- name: "Find pool configuration for pool: {{ crypto_target_pool }}"
+  ansible.builtin.set_fact:
+    crypto_pool_to_modify: "{{ (crypto_disks | selectattr('name', 'equalto', crypto_target_pool) | list | first) }}"
+
+- name: "Set pool variables for pool: {{ crypto_target_pool }}"
+  ansible.builtin.set_fact:
+    crypto_pool_mount: "{{ crypto_pool_to_modify.subvolumes[0] }}"
+    crypto_disk_passphrase: "{{ crypto_pool_to_modify.passphrase | default(luks_pass) }}"
+
+- name: "Verify target pool filesystem is mounted: {{ crypto_pool_mount }}"
+  become: true
+  ansible.builtin.command:
+    cmd: "mountpoint -q {{ crypto_pool_mount }}"
+  changed_when: false
+
+- name: "Format LUKS container on new member device: {{ crypto_add_device }}"
+  become: true
+  no_log: true
+  ansible.builtin.command:
+    cmd: "cryptsetup luksFormat -q -v -c aes-xts-plain64 -h sha256 {{ crypto_add_device }} --key-file -"
+    stdin: "{{ crypto_disk_passphrase }}"
+  changed_when: true
+
+- name: "Open new LUKS member mapper: {{ crypto_target_pool ~ '-' ~ crypto_new_dev_idx }}"
+  become: true
+  no_log: true
+  ansible.builtin.command:
+    cmd: "cryptsetup luksOpen {{ crypto_add_device }} {{ crypto_target_pool }}-{{ crypto_new_dev_idx }} --key-file -"
+    stdin: "{{ crypto_disk_passphrase }}"
+  changed_when: true
+
+- name: Ensure secure LUKS backup directory exists
+  become: true
+  ansible.builtin.file:
+    path: /var/backups/luks
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: "Backup LUKS header for new member device: {{ crypto_target_pool ~ '-' ~ crypto_new_dev_idx }}"
+  become: true
+  ansible.builtin.command:
+    cmd: >-
+      cryptsetup luksHeaderBackup {{ crypto_add_device }}
+      --header-backup-file /var/backups/luks/luks-header-{{ crypto_target_pool }}-{{ crypto_new_dev_idx }}.img
+  changed_when: true
+
+- name: "Ensure strict permissions on new LUKS header backup file: {{ crypto_target_pool ~ '-' ~ crypto_new_dev_idx }}"
+  become: true
+  ansible.builtin.file:
+    path: "/var/backups/luks/luks-header-{{ crypto_target_pool }}-{{ crypto_new_dev_idx }}.img"
+    owner: root
+    group: root
+    mode: "0400"
+
+- name: "Add new decrypted member device to Btrfs pool: {{ crypto_target_pool }}"
+  become: true
+  ansible.builtin.command:
+    cmd: "btrfs device add /dev/mapper/{{ crypto_target_pool }}-{{ crypto_new_dev_idx }} {{ crypto_pool_mount }}"
+  changed_when: true
+
+- name: "Query current Btrfs allocation profiles for pool: {{ crypto_target_pool }}"
+  become: true
+  ansible.builtin.command:
+    cmd: "btrfs filesystem df {{ crypto_pool_mount }}"
+  register: crypto_btrfs_df_output
+  changed_when: false
+
+- name: "Convert single-disk filesystem to RAID1 profile for pool: {{ crypto_target_pool }}"
+  when: "'Data, RAID1' not in crypto_btrfs_df_output.stdout"
+  become: true
+  ansible.builtin.command:
+    cmd: "btrfs balance start -dconvert=raid1 -mconvert=raid1 {{ crypto_pool_mount }}"
+  changed_when: true
+
+- name: "Execute filtered allocation balance on expanded RAID1 pool: {{ crypto_target_pool }}"
+  when:
+    - "'Data, RAID1' in crypto_btrfs_df_output.stdout"
+    - not (crypto_full_balance | default(false) | bool)
+  become: true
+  ansible.builtin.command:
+    cmd: "btrfs balance start -dusage=50 -musage=50 {{ crypto_pool_mount }}"
+  changed_when: true
+
+- name: "Execute full allocation balance on expanded RAID1 pool: {{ crypto_target_pool }}"
+  when:
+    - "'Data, RAID1' in crypto_btrfs_df_output.stdout"
+    - crypto_full_balance | default(false) | bool
+  become: true
+  ansible.builtin.command:
+    cmd: "btrfs balance start {{ crypto_pool_mount }}"
+  changed_when: true
+
+- name: Display post-addition notice
+  ansible.builtin.debug:
+    msg: >-
+      Successfully added member disk {{ crypto_add_device }} (/dev/mapper/{{ crypto_target_pool }}-{{ crypto_new_dev_idx }})
+      to pool '{{ crypto_target_pool }}' on {{ inventory_hostname }}.
+      Ensure '{{ crypto_add_device }}' is appended to 'devices' in host_vars/{{ inventory_hostname }}/main.yml.

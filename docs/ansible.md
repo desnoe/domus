@@ -255,7 +255,48 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-replace.yml -e replace_pool=data -e replace_index=0
   ```
 
-### 6. `ansible/backup.yml`
+### 6. `ansible/storage-disk-add.yml`
+- **Purpose**: Appends a new member disk to an existing encrypted Btrfs storage pool (single-disk to RAID1 conversion, or RAID1 2->3+ expansion).
+- **Target hosts**: `hosts: crypto`
+- **Workflow**: Auto-detects unformatted device in `crypto_disks[].devices` or accepts CLI `-e device=/dev/...`, formats LUKS, opens mapper as `<pool>-<N>`, saves header backup to `/var/backups/luks/`, adds device to Btrfs, automatically converts to RAID1 if previous state was single-disk, or runs a fast filtered balance (`-dusage=50 -musage=50`) by default on multi-disk expansion (with optional `-e full_balance=yes`).
+- **Usage**:
+  ```bash
+  # Auto-detect unformatted device candidate declared in host_vars
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-disk-add.yml -e pool=data
+
+  # Explicit device path and automatic confirmation (for automation / CI)
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-disk-add.yml -e pool=backup -e device=/dev/sde -e confirm_add=yes
+  ```
+
+### 7. `ansible/storage-disk-remove.yml`
+- **Purpose**: Safely evicts and wipes a member disk from an encrypted Btrfs storage pool (RAID1 shrinking or RAID1-to-single conversion).
+- **Target hosts**: `hosts: crypto`
+- **Safety**: Guard against removing the last disk of a pool, and interactive confirmation requiring typing `REMOVE` in uppercase (or `-e confirm_remove=yes`).
+- **Workflow**: Verifies pool has $>1$ disk, automatically converts profiles to `single`/`dup` if shrinking from 2 to 1 disk, evicts device via `btrfs device remove`, deregisters from Btrfs scan, closes LUKS mapper, wipes signatures and first 32 MiB on the physical disk, removes stale header backup, and performs live index compaction via `dmsetup rename` and `mv` for any surviving higher-index mappers ($j \rightarrow j-1$).
+- **Usage**:
+  ```bash
+  # Interactive mode (prompts for pool, member disk index, and 'REMOVE' confirmation)
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-disk-remove.yml
+
+  # Non-interactive mode (for automation / CI)
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-disk-remove.yml -e pool=backup -e disk_index=1 -e confirm_remove=yes
+  ```
+
+### 8. `ansible/storage-remove.yml`
+- **Purpose**: Targeted permanent decommissioning and wiping of an encrypted storage pool (both single-disk and multi-disk RAID pools).
+- **Target hosts**: `hosts: crypto`
+- **Safety**: Interactive confirmation requiring typing `REMOVE` in uppercase (or `-e confirm_remove=yes`).
+- **Workflow**: Prompts for or validates pool name against `crypto_disks`, stops active `btrfs-snapshot-*` systemd timers/services, unmounts all pool subvolumes, removes `/etc/fstab` entries, reloads systemd daemon, deregisters Btrfs devices (`btrfs device scan --forget`), closes LUKS mappers (`cryptsetup luksClose`), wipes filesystem signatures and first 32 MiB on physical member disks (`wipefs -a` and `dd`), and purges LUKS header backups from `/var/backups/luks/`.
+- **Usage**:
+  ```bash
+  # Interactive mode (prompts for pool name and 'REMOVE' confirmation)
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-remove.yml
+
+  # Non-interactive mode (for automation / CI)
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-remove.yml -e remove_pool=backup -e confirm_remove=yes
+  ```
+
+### 9. `ansible/backup.yml`
 - **Purpose**: Configures automated Btrfs snapshot and cloud synchronization `systemd` services and timers.
 - **Target hosts**: `hosts: crypto`
 - **Roles executed**:
@@ -266,7 +307,7 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/backup.yml
   ```
 
-### 7. `ansible/status.yml`
+### 10. `ansible/status.yml`
 - **Purpose**: Non-destructive, read-only diagnostic playbook reporting base host identity/uptime, locales/keyboard layout, time/NTP synchronization, SSH daemon settings and authorized key fingerprints, UFW firewall status, LUKS container status, header backups, SMART health, Btrfs usage and error stats, `btrfs-snapshot-*` / `rclone-sync-*` systemd timers, `journald` logs, `rclone` remote configuration status, and GitHub Actions self-hosted runner health.
 - **Roles executed**: Modularly imports status tasks from `base`, `locales`, `ntp`, `sshd`, `ufw` (`hosts: all`), `crypto`, `snapshot`, `rclone` (`hosts: crypto`), and `runner` (`hosts: runner`).
 - **Usage**:

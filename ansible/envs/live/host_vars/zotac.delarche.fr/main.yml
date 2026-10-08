@@ -13,6 +13,7 @@ crypto_disks:
       - /dev/disk/by-id/ata-ST2000DL003-9VT166_5YD49469
       - /dev/disk/by-id/ata-ST2000DL003-9VT166_5YD4997K
       - /dev/disk/by-id/ata-TOSHIBA_HDWG180_7160A0A6FBEG
+      - /dev/disk/by-id/ata-ST3000NC002-1DY166_Z1F4NKYK
     subvolumes:
       - "/home/{{ ansible_user }}/backup/sync"
       - "/home/{{ ansible_user }}/backup/snapshots"

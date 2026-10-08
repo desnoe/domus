@@ -114,13 +114,31 @@ Assisted workflow to format LUKS on a replacement drive, mount degraded if neces
 uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-replace.yml
 ```
 
-### 6. Configure Backup Services (Snapshots & Rclone)
+### 6. Add a Member Disk to a Storage Pool
+Formats LUKS on an additional drive, adds it to the pool, and converts from single-disk to RAID1 or performs a fast filtered allocation balance:
+```bash
+uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-disk-add.yml -e pool=data
+```
+
+### 7. Remove a Member Disk from a RAID1 Pool
+Safely converts profiles (if shrinking to 1 disk), evicts member drive via Btrfs, wipes signatures/LUKS headers, and compacts mapper indices online with zero downtime:
+```bash
+uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-disk-remove.yml -e pool=data -e disk_index=1
+```
+
+### 8. Decommission & Remove an Encrypted Storage Pool
+Permanently unmounts, closes, and wipes an encrypted storage pool (both single disk or multi-disk RAID pool). Includes interactive selection and safety confirmation (or non-interactive `-e remove_pool=<pool> -e confirm_remove=yes`):
+```bash
+uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-remove.yml
+```
+
+### 9. Configure Backup Services (Snapshots & Rclone)
 Copies your local `~/.config/rclone/rclone.conf` (`0600`), deploys `/home/{{ ansible_user }}/bin/snapshot.sh`, and configures sandboxed `systemd.service` and `systemd.timer` units for automated Btrfs snapshotting and cloud sync:
 ```bash
 uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/backup.yml
 ```
 
-### 7. Check Storage and System Health (Read-Only)
+### 10. Check Storage and System Health (Read-Only)
 Inspects base system identity/uptime, locales/keyboard, time/NTP sync, SSH daemon/authorized keys, UFW firewall status, LUKS encryption status, header backup presence, SMART health, Btrfs usage/error stats, `btrfs-snapshot-*` / `rclone-sync-*` systemd timers, `journald` logs, `rclone` remote configuration status, and Samba file sharing status:
 ```bash
 # Full health report

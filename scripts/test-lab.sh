@@ -301,6 +301,61 @@ grep -q "CI_SURVIVAL_OK" /home/olivier/backup/sync/ci_test.txt
 sudo btrfs scrub start -B /home/olivier/backup/sync
 rm -f /home/olivier/backup/sync/ci_test.txt
 EOF
+
+    # TC-STO-05: Non-interactive pool removal via storage-remove.yml
+    uv run ansible-playbook -i "${LAB_INVENTORY}" ansible/storage-remove.yml \
+        -e remove_pool=backup -e confirm_remove=yes
+
+    run_remote << 'EOF'
+readonly BACKUP_DISK_0="/dev/disk/by-id/ata-VBOX_HARDDISK_VB3a4d115e-5d14d18f"
+readonly BACKUP_DISK_1="/dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3"
+
+! mountpoint -q /home/olivier/backup/sync
+[ ! -e /dev/mapper/backup-0 ]
+[ ! -e /dev/mapper/backup-1 ]
+! sudo cryptsetup isLuks "${BACKUP_DISK_0}"
+! sudo cryptsetup isLuks "${BACKUP_DISK_1}"
+! grep -q 'LABEL=backup' /etc/fstab
+! sudo test -f /var/backups/luks/luks-header-backup-0.img
+! sudo test -f /var/backups/luks/luks-header-backup-1.img
+EOF
+
+    # Restore backup pool so lab remains fully provisioned
+    uv run ansible-playbook -i "${LAB_INVENTORY}" ansible/storage-wipe-and-reset.yml \
+        -e confirm_wipe=yes
+
+    # TC-STO-06: Member disk removal & live index compaction via storage-disk-remove.yml
+    uv run ansible-playbook -i "${LAB_INVENTORY}" ansible/storage-disk-remove.yml \
+        -e pool=backup -e disk_index=0 -e confirm_remove=yes
+
+    run_remote << 'EOF'
+readonly BACKUP_DISK_0="/dev/disk/by-id/ata-VBOX_HARDDISK_VB3a4d115e-5d14d18f"
+
+sudo btrfs filesystem df /home/olivier/backup/sync | grep -q 'Data, single'
+[ -e /dev/mapper/backup-0 ]
+[ ! -e /dev/mapper/backup-1 ]
+! sudo cryptsetup isLuks "${BACKUP_DISK_0}"
+sudo test -f /var/backups/luks/luks-header-backup-0.img
+! sudo test -f /var/backups/luks/luks-header-backup-1.img
+EOF
+
+    # TC-STO-07: Member disk addition & RAID1 conversion via storage-disk-add.yml
+    uv run ansible-playbook -i "${LAB_INVENTORY}" ansible/storage-disk-add.yml \
+        -e pool=backup -e device=/dev/disk/by-id/ata-VBOX_HARDDISK_VB3a4d115e-5d14d18f -e confirm_add=yes
+
+    run_remote << 'EOF'
+readonly BACKUP_DISK_0="/dev/disk/by-id/ata-VBOX_HARDDISK_VB3a4d115e-5d14d18f"
+readonly BACKUP_DISK_1="/dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3"
+
+sudo btrfs filesystem df /home/olivier/backup/sync | grep -q 'Data, RAID1'
+[ -e /dev/mapper/backup-0 ]
+[ -e /dev/mapper/backup-1 ]
+sudo cryptsetup isLuks "${BACKUP_DISK_0}"
+sudo cryptsetup isLuks "${BACKUP_DISK_1}"
+sudo test -f /var/backups/luks/luks-header-backup-0.img
+sudo test -f /var/backups/luks/luks-header-backup-1.img
+sudo btrfs scrub start -B /home/olivier/backup/sync
+EOF
 }
 
 step_status() {
@@ -317,7 +372,7 @@ Subcommands:
   storage-wipe-and-unlock  Run storage-wipe-and-reset.yml and verify storage-unlock.yml idempotence (TC-STO-01..02)
   backup-and-sync          Verify backup.yml idempotence, OneDrive sync (primary & secondary), snapshots, TC-BAK-05..07
   samba                    Deploy Samba, verify idempotence, SMB connectivity, shadow copies, and security (TC-SMB-01..07)
-  corner-cases-and-raid1   Run TC-ADV-01..06 corner cases, LUKS header restore, and RAID1 disk replacement
+  corner-cases-and-raid1   Run TC-ADV-01..06, RAID1 disk replacement, pool removal, disk add/remove (TC-STO-04..07)
   status                   Run full read-only health report via ansible/status.yml (TC-BAK-04)
   all                      Execute the complete non-regression campaign sequentially
 EOF

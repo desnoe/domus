@@ -1,0 +1,136 @@
+---
+- name: "Find pool configuration for pool: {{ crypto_target_pool }}"
+  ansible.builtin.set_fact:
+    crypto_pool_to_modify: "{{ (crypto_disks | selectattr('name', 'equalto', crypto_target_pool) | list | first) }}"
+
+- name: "Set removal facts for pool: {{ crypto_target_pool }}"
+  ansible.builtin.set_fact:
+    crypto_pool_mount: "{{ crypto_pool_to_modify.subvolumes[0] }}"
+    crypto_remove_mapper: "{{ crypto_target_pool }}-{{ crypto_remove_idx }}"
+
+- name: "Verify target pool filesystem is mounted: {{ crypto_pool_mount }}"
+  become: true
+  ansible.builtin.command:
+    cmd: "mountpoint -q {{ crypto_pool_mount }}"
+  changed_when: false
+
+- name: "Query live Btrfs member count for pool: {{ crypto_target_pool }}"
+  become: true
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -o pipefail
+      btrfs filesystem show "{{ crypto_pool_mount }}" | awk '/Total devices/ {print $3}'
+  register: crypto_btrfs_live_dev_count_cmd
+  changed_when: false
+
+- name: "Set live member count fact: {{ crypto_target_pool }}"
+  ansible.builtin.set_fact:
+    crypto_pool_live_member_count: "{{ crypto_btrfs_live_dev_count_cmd.stdout | trim | int }}"
+
+- name: "Validate pool has multiple member devices: {{ crypto_target_pool }}"
+  when: crypto_pool_live_member_count | int <= 1
+  ansible.builtin.fail:
+    msg: >-
+      Pool '{{ crypto_target_pool }}' has only 1 active member device in Btrfs.
+      To permanently destroy and remove an entire pool, use storage-remove.yml.
+
+- name: "Identify underlying physical device for mapper: {{ crypto_remove_mapper }}"
+  become: true
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -o pipefail
+      cryptsetup status "{{ crypto_remove_mapper }}" | awk '$1 == "device:" {print $2}'
+  register: crypto_mapper_status_cmd
+  changed_when: false
+
+- name: "Resolve underlying physical device fact: {{ crypto_remove_mapper }}"
+  ansible.builtin.set_fact:
+    crypto_remove_device: >-
+      {{
+        crypto_mapper_status_cmd.stdout | trim
+        if (crypto_mapper_status_cmd.stdout | trim | length > 0)
+        else (crypto_pool_to_modify.devices[crypto_remove_idx | int] | default(''))
+      }}
+
+- name: "Convert RAID1 profile to single/dup before shrinking to 1 disk for pool: {{ crypto_target_pool }}"
+  when: crypto_pool_live_member_count | int == 2
+  become: true
+  ansible.builtin.command:
+    cmd: "btrfs balance start -dconvert=single -mconvert=dup {{ crypto_pool_mount }}"
+  changed_when: true
+
+- name: "Evict member device from Btrfs pool: {{ crypto_remove_mapper }}"
+  become: true
+  ansible.builtin.command:
+    cmd: "btrfs device remove /dev/mapper/{{ crypto_remove_mapper }} {{ crypto_pool_mount }}"
+  changed_when: true
+
+- name: "Deregister removed device from Btrfs scan: {{ crypto_remove_mapper }}"
+  become: true
+  ansible.builtin.command:
+    cmd: "btrfs device scan --forget /dev/mapper/{{ crypto_remove_mapper }}"
+  changed_when: true
+  failed_when: false
+
+- name: "Close LUKS mapper for removed member device: {{ crypto_remove_mapper }}"
+  become: true
+  ansible.builtin.command:
+    cmd: "cryptsetup luksClose {{ crypto_remove_mapper }}"
+  changed_when: true
+
+- name: "Wipe signatures and headers on physical member disk: {{ crypto_remove_device }}"
+  become: true
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -euo pipefail
+      wipefs -a "{{ crypto_remove_device }}"
+      dd if=/dev/zero of="{{ crypto_remove_device }}" bs=1M count=32 status=none conv=fdatasync
+  changed_when: true
+
+- name: "Remove stale LUKS header backup file: {{ crypto_remove_mapper }}"
+  become: true
+  ansible.builtin.file:
+    path: "/var/backups/luks/luks-header-{{ crypto_remove_mapper }}.img"
+    state: absent
+
+- name: "Perform live index compaction for surviving mappers: {{ crypto_target_pool }}"
+  become: true
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -euo pipefail
+      for (( j={{ crypto_remove_idx | int + 1 }}; j<=16; j++ )); do
+        prev=$((j - 1))
+        old_mapper="{{ crypto_target_pool }}-$j"
+        new_mapper="{{ crypto_target_pool }}-$prev"
+        if [ -e "/dev/mapper/$old_mapper" ]; then
+          dmsetup rename "$old_mapper" "$new_mapper"
+        fi
+        old_hdr="/var/backups/luks/luks-header-{{ crypto_target_pool }}-$j.img"
+        new_hdr="/var/backups/luks/luks-header-{{ crypto_target_pool }}-$prev.img"
+        if [ -f "$old_hdr" ]; then
+          mv -f "$old_hdr" "$new_hdr"
+        fi
+      done
+  changed_when: true
+
+- name: "Ensure subvolumes remain mounted after device removal: {{ crypto_target_pool }}"
+  become: true
+  ansible.posix.mount:
+    path: "{{ item }}"
+    src: "LABEL={{ crypto_target_pool }}"
+    fstype: btrfs
+    opts: "{{ crypto_btrfs_default_mount_options }},subvol={{ item | regex_replace('^/+', '') | regex_replace('/+$', '') | replace('/', '_') }}"
+    boot: false
+    state: mounted
+  loop: "{{ crypto_pool_to_modify.subvolumes }}"
+
+- name: Display post-removal notice
+  ansible.builtin.debug:
+    msg: >-
+      Successfully removed member disk {{ crypto_remove_device }} (index {{ crypto_remove_idx }})
+      from pool '{{ crypto_target_pool }}' on {{ inventory_hostname }}.
+      Remember to remove '{{ crypto_remove_device }}' from 'devices' in host_vars/{{ inventory_hostname }}/main.yml.
