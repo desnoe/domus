@@ -246,6 +246,41 @@ flowchart LR
 
 ---
 
+### `TC-STO-06` — Member Disk Removal & Live Index Compaction (`storage-disk-remove.yml`)
+- **Objective**: Verify non-interactive member disk removal from a 2-disk RAID1 pool, including automated RAID1 $\rightarrow$ single/dup profile conversion, Btrfs device eviction, LUKS closure and wiping of the physical disk, and live mapper index compaction via `dmsetup rename`.
+- **Preconditions**: `backup` pool is unlocked and mounted with 2 member disks (`/dev/sdd` as `backup-0`, `/dev/sde` as `backup-1`).
+- **Commands**:
+  ```bash
+  ANSIBLE_HOME=/tmp/.ansible uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-disk-remove.yml -e pool=backup -e disk_index=0 -e confirm_remove=yes
+  ssh olivier@debian.delarche.fr "sudo btrfs filesystem df /home/olivier/backup; sudo btrfs filesystem show /home/olivier/backup; ls -l /dev/mapper/backup-*; sudo cryptsetup isLuks /dev/sdd || echo 'WIPED_SDD'"
+  ```
+- **Expected Result**:
+  - `backup` pool remains online and mounted.
+  - Data profile is converted to `single`, metadata to `dup`.
+  - Member count in Btrfs filesystem is `1`.
+  - Removed disk `/dev/sdd` is no longer a LUKS container (`isLuks` fails, reporting `WIPED_SDD`).
+  - Surviving device `/dev/sde` has been live-compacted from `backup-1` to `backup-0` (`/dev/mapper/backup-0` is active; `/dev/mapper/backup-1` does not exist).
+  - Header file `/var/backups/luks/luks-header-backup-0.img` is present, while index 1 is deleted.
+
+---
+
+### `TC-STO-07` — Member Disk Addition & RAID1 Conversion (`storage-disk-add.yml`)
+- **Objective**: Verify non-interactive member disk addition to a single-disk pool, including LUKS formatting, header backup creation, Btrfs device addition, and automated single $\rightarrow$ RAID1 profile conversion balance.
+- **Preconditions**: `backup` pool is online with 1 disk (`backup-0` on `/dev/sde`), and `/dev/sdd` is wiped.
+- **Commands**:
+  ```bash
+  ANSIBLE_HOME=/tmp/.ansible uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-disk-add.yml -e pool=backup -e device=/dev/sdd -e confirm_add=yes
+  ssh olivier@debian.delarche.fr "sudo btrfs filesystem df /home/olivier/backup; sudo btrfs filesystem show /home/olivier/backup; ls -l /dev/mapper/backup-*"
+  ```
+- **Expected Result**:
+  - `backup` pool has 2 active member devices (`devid 1` and `devid 2`).
+  - Both `/dev/mapper/backup-0` and `/dev/mapper/backup-1` are active and valid LUKS containers.
+  - Btrfs filesystem profiles report `Data, RAID1` and `Metadata, RAID1`.
+  - Both header backups `/var/backups/luks/luks-header-backup-{0,1}.img` exist with mode `0400`.
+  - Scrub reports 0 errors (`sudo btrfs scrub start -B /home/olivier/backup`).
+
+---
+
 ## 5. Cloud Sync (`rclone`) & Btrfs Snapshots (`snapshot`) via `systemd` (`TC-BAK`)
 
 ### `TC-BAK-01` — `backup.yml` Deployment, Official `rclone` Package & Idempotence

@@ -63,9 +63,11 @@ Playbooks are strictly separated by operational responsibility (no role duplicat
 3. `ansible/storage-unlock.yml`: Non-destructive post-reboot LUKS unlock, `btrfs device scan`, and subvolume mounting (`hosts: crypto`).
 4. `ansible/storage-wipe-and-reset.yml`: Destructive storage reset with interactive `WIPE` confirmation (`hosts: crypto`).
 5. `ansible/storage-replace.yml`: Guided Btrfs RAID1 member disk replacement (`hosts: crypto`), supporting auto-detection of unformatted/closed disks across multiple pools or targeted replacement via `-e replace_pool=<pool> -e replace_index=<idx>`.
-6. `ansible/storage-remove.yml`: Targeted permanent decommissioning and wiping of an encrypted storage pool (`hosts: crypto`), supporting interactive pool selection or `-e remove_pool=<pool> -e confirm_remove=yes`.
-7. `ansible/backup.yml`: Deploys `snapshot` and `rclone` `systemd.service` and `systemd.timer` units (`hosts: crypto`).
-8. `ansible/status.yml`: Read-only health reporting across `base`, `locales`, `ntp`, `sshd`, `ufw` (`hosts: all`), `crypto`, `snapshot`, `rclone`, `samba` (`hosts: crypto`), and `runner` (`hosts: runner`) roles (supports `--tags base|locales|ntp|sshd|ufw|crypto|snapshot|rclone|samba|runner`).
+6. `ansible/storage-disk-add.yml`: Appends a new member disk to an encrypted Btrfs storage pool (`hosts: crypto`), supporting single-to-RAID1 conversion or RAID1 expansion with filtered balance.
+7. `ansible/storage-disk-remove.yml`: Removes a member disk from an encrypted Btrfs storage pool (`hosts: crypto`), supporting RAID1 shrinking or RAID1-to-single conversion with live mapper index compaction.
+8. `ansible/storage-remove.yml`: Targeted permanent decommissioning and wiping of an encrypted storage pool (`hosts: crypto`), supporting interactive pool selection or `-e remove_pool=<pool> -e confirm_remove=yes`.
+9. `ansible/backup.yml`: Deploys `snapshot` and `rclone` `systemd.service` and `systemd.timer` units (`hosts: crypto`).
+10. `ansible/status.yml`: Read-only health reporting across `base`, `locales`, `ntp`, `sshd`, `ufw` (`hosts: all`), `crypto`, `snapshot`, `rclone`, `samba` (`hosts: crypto`), and `runner` (`hosts: runner`) roles (supports `--tags base|locales|ntp|sshd|ufw|crypto|snapshot|rclone|samba|runner`).
 
 ---
 

@@ -343,3 +343,181 @@ Assuming pool `<pool>` with multiple member disks (e.g. `/dev/disk/by-id/<disk1>
    - Remove the pool definition from `crypto_disks`.
    - Remove any associated jobs from `snapshot_jobs`, `rclone_jobs`, or shares from `samba_shares`.
    - Run `ansible/system.yml` to apply clean baseline configurations.
+
+---
+
+## ➕ Scenario 7: Adding a Disk to an Encrypted Storage Pool
+
+Use this procedure when adding an additional physical drive to an existing storage pool.
+In Btrfs pools, physical disk order has no technical or performance impact. New drives must **always be added at the end** of the pool (index `$N$`), which preserves existing mapper indices (`<pool>-0` to `<pool>-<N-1>`).
+
+### Case A: Converting Single-Disk Pool to 2-Disk Btrfs RAID1 (1 $\rightarrow$ 2 Disks)
+
+Assuming single-disk pool `<pool>` with mapper `<pool>-0` mounted at `/path/to/mount`, and new physical disk `/dev/disk/by-id/<new-disk>`:
+
+1. **Format LUKS on the new physical drive**:
+   ```bash
+   sudo cryptsetup luksFormat -q -v -c aes-xts-plain64 -h sha256 /dev/disk/by-id/<new-disk>
+   ```
+
+2. **Open the new LUKS container as index 1**:
+   ```bash
+   sudo cryptsetup luksOpen /dev/disk/by-id/<new-disk> <pool>-1
+   ```
+
+3. **Backup the new LUKS header**:
+   ```bash
+   sudo cryptsetup luksHeaderBackup /dev/disk/by-id/<new-disk> --header-backup-file /var/backups/luks/luks-header-<pool>-1.img
+   sudo chmod 0400 /var/backups/luks/luks-header-<pool>-1.img
+   ```
+
+4. **Add the new mapper to the mounted Btrfs filesystem**:
+   ```bash
+   sudo btrfs device add /dev/mapper/<pool>-1 /path/to/mount
+   ```
+
+5. **Convert existing data and metadata to RAID1 profile**:
+   Because existing chunks were stored in `single`/`dup` mode, a profile conversion balance is required to mirror data:
+   ```bash
+   sudo btrfs balance start -dconvert=raid1 -mconvert=raid1 /path/to/mount
+   ```
+
+6. **Verify filesystem status**:
+   ```bash
+   sudo btrfs filesystem usage /path/to/mount
+   ```
+   Both `Data` and `Metadata` must report `RAID1`.
+
+7. **Update Ansible Host Variables**:
+   In `ansible/envs/<env>/host_vars/<hostname>/main.yml`, append `/dev/disk/by-id/<new-disk>` to the `devices` list of pool `<pool>`:
+   ```yaml
+   crypto_disks:
+     - name: <pool>
+       devices:
+         - /dev/disk/by-id/<existing-disk>
+         - /dev/disk/by-id/<new-disk>
+   ```
+
+---
+
+### Case B: Expanding an Existing Btrfs RAID1 Pool (2 $\rightarrow$ 3+ Disks)
+
+Assuming a pool with $N$ member drives (`<pool>-0` .. `<pool>-<N-1>`), adding a new drive as index $N$:
+
+1. **Format LUKS and open the new mapper as `<pool>-<N>`**:
+   ```bash
+   sudo cryptsetup luksFormat -q -v -c aes-xts-plain64 -h sha256 /dev/disk/by-id/<new-disk>
+   sudo cryptsetup luksOpen /dev/disk/by-id/<new-disk> <pool>-<N>
+   sudo cryptsetup luksHeaderBackup /dev/disk/by-id/<new-disk> --header-backup-file /var/backups/luks/luks-header-<pool>-<N>.img
+   sudo chmod 0400 /var/backups/luks/luks-header-<pool>-<N>.img
+   ```
+
+2. **Add the device to the filesystem**:
+   ```bash
+   sudo btrfs device add /dev/mapper/<pool>-<N> /path/to/mount
+   ```
+
+3. **Rebalance allocations**:
+   - **Filtered balance (recommended)**: rebalances chunks filled below 50% quickly without high I/O impact:
+     ```bash
+     sudo btrfs balance start -dusage=50 -musage=50 /path/to/mount
+     ```
+   - **Full balance (optional)**: rebalances 100% of data evenly across all disks:
+     ```bash
+     sudo btrfs balance start /path/to/mount
+     ```
+
+4. **Update Ansible Host Variables**:
+   Append `/dev/disk/by-id/<new-disk>` to the `devices` list in `host_vars/<hostname>/main.yml`.
+
+---
+
+## ➖ Scenario 8: Removing a Disk from an Encrypted Storage Pool
+
+Use this procedure when removing a member disk from a storage pool (e.g. decommissioning a drive or reducing pool size).
+
+> [!WARNING]
+> Before removing a drive, verify that the remaining drives have sufficient unallocated capacity to hold all filesystem data:
+> `sudo btrfs filesystem usage /path/to/mount`
+
+### Case A: Shrinking an Existing Btrfs RAID1 Pool (3+ $\rightarrow$ 2 Disks)
+
+Assuming member disk `<pool>-<k>` (where $0 \le k < N$) is to be removed from a pool of $N$ disks:
+
+1. **Evict device from the Btrfs filesystem**:
+   Btrfs will safely migrate all chunks stored on `<pool>-<k>` onto the remaining member drives:
+   ```bash
+   sudo btrfs device remove /dev/mapper/<pool>-<k> /path/to/mount
+   ```
+
+2. **Deregister device scan and close the LUKS mapper**:
+   ```bash
+   sudo btrfs device scan --forget /dev/mapper/<pool>-<k>
+   sudo cryptsetup luksClose <pool>-<k>
+   ```
+
+3. **Wipe signatures and zero first 32 MiB on the physical drive**:
+   ```bash
+   sudo wipefs -a /dev/disk/by-id/<removed-disk>
+   sudo dd if=/dev/zero of=/dev/disk/by-id/<removed-disk> bs=1M count=32 status=progress conv=fdatasync
+   ```
+
+4. **Remove stale LUKS header backup**:
+   ```bash
+   sudo rm -f /var/backups/luks/luks-header-<pool>-<k>.img
+   ```
+
+5. **Live Index Compaction (if $k < N - 1$)**:
+   If the removed drive was not the last index in the pool, renumber each subsequent live mapper $j \in [k+1 .. N-1]$ down by 1 online:
+   ```bash
+   # Example: if k=1 in a 3-disk pool (0, 1, 2), shift index 2 to 1
+   sudo dmsetup rename <pool>-2 <pool>-1
+   sudo mv /var/backups/luks/luks-header-<pool>-2.img /var/backups/luks/luks-header-<pool>-1.img
+   ```
+   *`dmsetup rename` updates the active device-mapper node live without unmounting the filesystem.*
+
+6. **Update Ansible Host Variables**:
+   In `host_vars/<hostname>/main.yml`, remove `/dev/disk/by-id/<removed-disk>` from `devices`. The remaining entries will naturally match indices `0 .. N-2`.
+
+---
+
+### Case B: Converting a 2-Disk RAID1 Pool to a Single Encrypted Disk (2 $\rightarrow$ 1 Disk)
+
+Btrfs prohibits removing a drive from a 2-disk RAID1 pool while the RAID1 profile is active. You must convert the data and metadata profiles before device removal:
+
+1. **Convert data and metadata profiles away from RAID1**:
+   ```bash
+   sudo btrfs balance start -dconvert=single -mconvert=dup /path/to/mount
+   ```
+
+2. **Remove member device `<pool>-<k>`**:
+   ```bash
+   sudo btrfs device remove /dev/mapper/<pool>-<k> /path/to/mount
+   ```
+
+3. **Deregister scan, close LUKS mapper, and wipe physical drive**:
+   ```bash
+   sudo btrfs device scan --forget /dev/mapper/<pool>-<k>
+   sudo cryptsetup luksClose <pool>-<k>
+   sudo wipefs -a /dev/disk/by-id/<removed-disk>
+   sudo dd if=/dev/zero of=/dev/disk/by-id/<removed-disk> bs=1M count=32 status=progress conv=fdatasync
+   sudo rm -f /var/backups/luks/luks-header-<pool>-<k>.img
+   ```
+
+4. **Live Index Compaction (if $k = 0$)**:
+   If index 0 was removed, live-rename the surviving index 1 mapper to index 0:
+   ```bash
+   sudo dmsetup rename <pool>-1 <pool>-0
+   sudo mv /var/backups/luks/luks-header-<pool>-1.img /var/backups/luks/luks-header-<pool>-0.img
+   ```
+
+5. **Ensure Subvolumes Remain Mounted**:
+   If the evicted disk was the primary VFS mount device (index 0), the Linux kernel may trigger an automatic unmount. Remount subvolumes cleanly:
+   ```bash
+   for subvol in /path/to/subvol1 /path/to/subvol2; do
+     mountpoint -q "$subvol" || sudo mount "$subvol"
+   done
+   ```
+
+6. **Update Ansible Host Variables**:
+   Remove `/dev/disk/by-id/<removed-disk>` from `devices` in `host_vars/<hostname>/main.yml`, leaving a single device entry at index 0.
