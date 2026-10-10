@@ -1,4 +1,46 @@
 ---
 samba_allowed_subnet: "192.168.1.0/24"
 samba_server_min_protocol: "SMB3"
+# Declarative list of Samba shares exposed to clients.
+#
+# Supported share dictionary keys:
+#   - name: (Required, string)
+#       Identifier of the share exposed to network clients (e.g. 'data', 'backup').
+#   - path: (Required, string)
+#       Absolute path of the directory on the server to share (e.g. '/home/olivier/data/sync').
+#   - snapdir: (Required, string)
+#       Absolute path to the Btrfs snapshots directory exposed as Windows/macOS Previous
+#       Versions via vfs_shadow_copy2 (e.g. '/home/olivier/data/snapshots').
+#   - comment: (Optional, string, default: 'Btrfs share with Previous Versions')
+#       Human-readable description displayed in network browsing or Finder.
+#   - read_only: (Optional, bool, default: true)
+#       Locks the share in read-only mode to prevent accidental client overwrites or ransomware.
+#   - browseable: (Optional, bool, default: true)
+#       Controls whether the share is visible when browsing server shares.
+#   - guest_ok: (Optional, bool, default: false)
+#       Whether unauthenticated guest logins are permitted.
+#   - valid_users: (Optional, string, default: '{{ ansible_user }}')
+#       Space-separated list of authorized users.
+#   - fruit: (Optional, bool, default: true)
+#       Enables Apple SMB (AAPL) protocol extensions via VFS modules:
+#       'vfs objects = catia fruit streams_xattr shadow_copy2'.
+#       Provides native character translation (catia), alternate data streams for Mac resource
+#       forks and extended attributes (fruit/streams_xattr, preventing '._*' clutter),
+#       native UTF-8 encoding, and Finder integration.
+#   - fruit_model: (Optional, string, default: 'Macmini')
+#       Apple hardware model icon displayed in macOS Finder. Common values:
+#       'Macmini', 'MacBookPro', 'iMac', 'MacPro', 'TimeCapsule'.
+#
+# Example:
+# samba_shares:
+#   - name: data
+#     path: "/home/{{ ansible_user }}/data/sync"
+#     snapdir: "/home/{{ ansible_user }}/data/snapshots"
+#     comment: "Zotac DATA"
+#     fruit: true
+#     fruit_model: "Macmini"
+#   - name: backup
+#     path: "/home/{{ ansible_user }}/backup/sync"
+#     snapdir: "/home/{{ ansible_user }}/backup/snapshots"
+#     comment: "Zotac BACKUP"
 samba_shares: []

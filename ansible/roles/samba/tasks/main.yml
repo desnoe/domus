@@ -4,6 +4,7 @@
   ansible.builtin.apt:
     name:
       - samba
+      - samba-vfs-modules
     state: present
 
 - name: Deploy Samba configuration

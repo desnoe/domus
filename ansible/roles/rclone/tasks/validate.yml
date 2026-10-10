@@ -43,7 +43,8 @@
       - item.minute is not defined or (item.minute is integer and 0 <= item.minute <= 59)
       - >-
         item.filters is not defined or (item.filters is sequence and item.filters is not string
-        and item.filters | select('string') | list | length == item.filters | length)
+        and item.filters | select('string') | list | length == item.filters | length
+        and item.filters | select('match', '^[+-] ') | list | length == item.filters | length)
       - >-
         item.extra_args is not defined or (item.extra_args is sequence and item.extra_args is not string
         and item.extra_args | select('string') | list | length == item.extra_args | length)
@@ -52,7 +53,8 @@
       is invalid. Rules: name matches ^[a-z0-9][a-z0-9-]*$; only keys {{ rclone_job_allowed_keys | join(', ') }};
       source.provider is a non-empty string; destination.mount is an absolute path declared in
       crypto_disks[*].subvolumes ({{ rclone_allowed_mounts | join(', ') }}); destination.path, when set, is a
-      non-empty relative path without '..'; hour 0-23; minute 0-59; filters/extra_args are lists of strings.
+      non-empty relative path without '..'; hour 0-23; minute 0-59; filters must be strings starting with '+ ' or '- ';
+      extra_args are lists of strings.
   vars:
     rclone_allowed_mounts: >-
       {{ crypto_disks | default([]) | map(attribute='subvolumes') | flatten | map('regex_replace', '/+$', '') | list }}

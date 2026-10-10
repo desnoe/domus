@@ -7,16 +7,21 @@ crypto_disks:
       - "/home/{{ ansible_user }}/data/sync"
       - "/home/{{ ansible_user }}/data/snapshots"
   # Btrfs RAID1 over 2 TB + 2 TB + 8 TB => ~4 TB usable (bounded by largest member).
-  # ST2000DL003 drives date from 2011: monitor SMART.
+  # Btrfs RAID1 over 2 TB + 2 TB + 8 TB + 3 TB => ~4.5 TB usable.
+  # External USB 4-bay dock: use stable /dev/disk/by-id/usb-* links to ensure
+  # permanent, reliable enumeration immune to USB 2.0 SAT/ata_id quirks.
   - name: backup
     devices:
-      - /dev/disk/by-id/ata-ST2000DL003-9VT166_5YD49469
-      - /dev/disk/by-id/ata-ST2000DL003-9VT166_5YD4997K
-      - /dev/disk/by-id/ata-TOSHIBA_HDWG180_7160A0A6FBEG
-      - /dev/disk/by-id/ata-ST3000NC002-1DY166_Z1F4NKYK
+      - /dev/disk/by-id/usb-ST2000DL_003-9VT166_0000000000000002-0:0  # Bay 2: 5YD49469
+      - /dev/disk/by-id/usb-ST2000DL_003-9VT166_0000000000000001-0:0  # Bay 1: 5YD4997K
+      - /dev/disk/by-id/usb-TOSHIBA_HDWG180_0000000000000004-0:0        # Bay 4: 7160A0A6FBEG
+      - /dev/disk/by-id/usb-ST3000NC_002-1DY166_0000000000000003-0:0  # Bay 3: Z1F4NKYK
     subvolumes:
       - "/home/{{ ansible_user }}/backup/sync"
       - "/home/{{ ansible_user }}/backup/snapshots"
+
+crypto_no_compression_paths:
+  - "/home/{{ ansible_user }}/backup/sync/googledrive/macbookpro"
 
 snapshot_jobs:
   - name: data
@@ -30,11 +35,17 @@ samba_shares:
   - name: data
     path: "/home/{{ ansible_user }}/data/sync"
     snapdir: "/home/{{ ansible_user }}/data/snapshots"
-    comment: "Zotac DATA"
+    comment: "Btrfs data"
+  - name: data-snapshots
+    path: "/home/{{ ansible_user }}/data/snapshots"
+    comment: "Btrfs data snapshots"
   - name: backup
     path: "/home/{{ ansible_user }}/backup/sync"
     snapdir: "/home/{{ ansible_user }}/backup/snapshots"
-    comment: "Zotac BACKUP"
+    comment: "Btrfs backup"
+  - name: backup-snapshots
+    path: "/home/{{ ansible_user }}/backup/snapshots"
+    comment: "Btrfs backup snapshots"
 
 rclone_jobs:
   - name: googledrive
@@ -44,4 +55,14 @@ rclone_jobs:
       mount: "/home/{{ ansible_user }}/backup/sync"
       path: "googledrive/mydrive"
     extra_args:
-      - "--drive-skip-gdocs"
+      - --drive-skip-gdocs
+  - name: googledrive-macbookpro
+    source:
+      provider: GoogleDrive-MacBookPro
+    destination:
+      mount: "/home/{{ ansible_user }}/backup/sync"
+      path: "googledrive/macbookpro"
+    filters:
+      - "- **.lrdata/**"
+    extra_args:
+      - --drive-skip-gdocs

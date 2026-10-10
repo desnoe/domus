@@ -13,3 +13,7 @@
   loop: "{{ crypto_disks | default([]) }}"
   loop_control:
     loop_var: disk
+
+- name: Apply non-compression attributes to designated directories
+  ansible.builtin.include_tasks: no-compression.yml
+  when: (crypto_no_compression_paths | default([])) | length > 0

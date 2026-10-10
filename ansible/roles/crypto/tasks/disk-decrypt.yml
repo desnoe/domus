@@ -4,11 +4,44 @@
     path: "/dev/mapper/{{ crypto_disk_name }}-{{ dev_idx }}"
   register: crypto_luks_volume
 
+- name: "Check physical device presence: {{ dev_item }}"
+  when: not crypto_luks_volume.stat.exists
+  ansible.builtin.stat:
+    path: "{{ dev_item }}"
+  register: crypto_dev_stat
+
+- name: "Trigger udev settle if physical device is missing: {{ dev_item }}"
+  when:
+    - not crypto_luks_volume.stat.exists
+    - not crypto_dev_stat.stat.exists
+  become: true
+  ansible.builtin.command:
+    cmd: "udevadm trigger --settle"
+  changed_when: false
+
+- name: "Re-check physical device presence after udev settle: {{ dev_item }}"
+  when:
+    - not crypto_luks_volume.stat.exists
+    - not crypto_dev_stat.stat.exists
+  ansible.builtin.stat:
+    path: "{{ dev_item }}"
+  register: crypto_dev_stat_retry
+
+- name: "Assert physical device exists before decrypting: {{ dev_item }}"
+  when: not crypto_luks_volume.stat.exists
+  ansible.builtin.assert:
+    that:
+      - (crypto_dev_stat.stat.exists) or (crypto_dev_stat_retry.stat.exists | default(false))
+    fail_msg: >-
+      Physical device '{{ dev_item }}' does not exist on {{ inventory_hostname }}.
+      Ensure the disk is powered on and connected.
+      If using an external USB enclosure, drives may need spin-up time or a USB hub reset ('usbreset').
+
 - name: "Open LUKS encrypted device: {{ dev_item }}"
   become: true
   no_log: true
   ansible.builtin.command:
-    cmd: "cryptsetup luksOpen {{ dev_item }} {{ crypto_disk_name }}-{{ dev_idx }} --key-file -"
+    cmd: "cryptsetup luksOpen {{ dev_item }} {{ crypto_disk_name }}-{{ dev_idx }} --key-file - {{ crypto_perf_flags | default('') }}"
     stdin: "{{ crypto_disk_passphrase }}"
   when: not crypto_luks_volume.stat.exists
   changed_when: true

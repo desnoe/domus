@@ -13,6 +13,20 @@ User={{ ansible_user }}
 Group={{ ansible_user }}
 SyslogIdentifier=rclone-sync-{{ item.name }}
 
+# Process & I/O scheduling priority
+# Lower process priority and best-effort I/O scheduling protect interactive SSH sessions and
+# Samba file sharing throughput during sustained background synchronization.
+Nice={{ item.nice | default(rclone_service_nice) }}
+IOSchedulingClass=best-effort
+IOSchedulingPriority={{ item.io_priority | default(rclone_service_io_priority) }}
+
+# Resource limits
+# Hard-bounding cgroup memory prevents runaway Go runtime heap expansion during large
+# cloud metadata listings (e.g., photo backups with 50k+ files). Exceeding MemoryMax
+# cleanly terminates the unit instead of causing kernel swap thrashing and dropping host networking.
+MemoryHigh=3G
+MemoryMax=4G
+
 # Security & filesystem sandboxing
 NoNewPrivileges=true
 PrivateTmp=true
@@ -25,16 +39,17 @@ ExecStartPre=/usr/bin/test -s /home/{{ ansible_user }}/.config/rclone/rclone.con
 ExecStartPre=/usr/bin/chmod 0600 /home/{{ ansible_user }}/.config/rclone/rclone.conf
 ExecStartPre=/usr/bin/mkdir -p "{{ item.target_dir }}"
 
+# Note: --fast-list is intentionally omitted to avoid buffering entire massive
+# remote directory trees in memory (which previously triggered 6.4+ GB memory peaks).
 ExecStart=/usr/bin/rclone sync \
     --config /home/{{ ansible_user }}/.config/rclone/rclone.conf \
     -v \
     --stats-one-line \
     --stats 1m \
     --modify-window 1s \
-    --transfers 2 \
+    --transfers 4 \
     --checkers 4 \
-    --buffer-size 32M \
-    --fast-list \
+    --buffer-size 16M \
     --delete-during \
     --create-empty-src-dirs \
     --delete-excluded \

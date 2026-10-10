@@ -75,6 +75,7 @@
   loop: "{{ rclone_jobs_resolved | default([]) }}"
   loop_control:
     label: "{{ item.name }}"
+  register: rclone_service_unit_templates
 
 - name: Deploy rclone systemd timer unit
   ansible.builtin.template:
@@ -86,6 +87,12 @@
   loop: "{{ rclone_jobs_resolved | default([]) }}"
   loop_control:
     label: "{{ item.name }}"
+  register: rclone_timer_unit_templates
+
+- name: Reload systemd daemon if rclone unit files changed
+  when: rclone_service_unit_templates.changed or rclone_timer_unit_templates.changed
+  ansible.builtin.systemd_service:
+    daemon_reload: true
 
 - name: Clean up orphaned rclone systemd units
   ansible.builtin.import_tasks: cleanup.yml

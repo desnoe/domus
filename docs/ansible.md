@@ -40,14 +40,21 @@ flowchart TD
    - `noauto,nofail`: Ensures the host boots reliably without emergency shell drops before encrypted LUKS containers are unlocked.
    - `user_subvol_rm_allowed`: Enables snapshot rotation by `ansible_user` without root elevation.
 
-#### SMR Drive Optimization & Mount Options Rationale
-Our storage configuration specifically accounts for mechanical SMR (Shingled Magnetic Recording) drives (e.g., Seagate Barracuda):
-- **SMR Architecture Challenges**: SMR drives overlap data tracks like roof shingles to increase areal density. Modifying existing data requires reading an entire band of overlapping tracks into cache, modifying the target sectors, and rewriting the entire band sequentially (Read-Modify-Write cycle). To manage this, SMR drives use a small internal CMR (Conventional Magnetic Recording) write cache. If write bursts are too aggressive, erratic, or fragmented, the CMR cache quickly exhausts, forcing the drive firmware into synchronous on-disk band rewrites that cause severe I/O latency spikes and throughput collapse.
-- **`rw,async` (Explicit Asynchronous I/O Baseline)**: While standard Linux mount options (`defaults`) include asynchronous I/O, Ansible's `mount` module rejects `defaults` when paired with `boot: false` due to an internal conflict with `auto`. We explicitly specify `rw,async` to lock the asynchronous baseline. Asynchronous I/O allows the Linux kernel page cache to buffer, aggregate, and reorder writes in RAM before dispatching them to the drive controller in large sequential flushes, preventing processes from stalling on slow physical shingled tracks.
-- **`compress=zstd:1` (Ultra-Fast Compression)**: Lowered from `zstd:3` to `zstd:1`. Level 1 is the fastest Zstandard compression profile in Btrfs. While saving slightly less disk space than level 3, level 1 drastically cuts CPU latency and eliminates uneven write pauses. It streams compressed extents almost instantaneously into the kernel I/O queue, delivering a predictable, continuous data flow that allows the SMR drive's CMR cache to drain efficiently without saturating.
-- **`noatime` (Read Metadata Optimization)**: Disables access time updates on read operations, eliminating unnecessary random metadata writes that would otherwise fragment SMR tracks and accelerate flash wear.
-- **Omission of `autodefrag`**: Btrfs `autodefrag` is intentionally omitted. Background defragmentation causes severe write amplification and triggers constant, destructive Read-Modify-Write cycles across SMR shingle bands.
-- **Rclone Transfer Throttling (`--transfers 2 --checkers 4 --buffer-size 32M --fast-list`)**: Configured in `rclone-sync-*.service` to pace inbound network transfers, preventing parallel sync threads from overwhelming both the Btrfs writeback queue and the SMR drive's CMR buffer cache.
+#### Btrfs Mount Options & Storage Architecture Rationale (CMR & SSD)
+
+> [!NOTE]
+> **Storage Hardware Baseline**: All storage devices across our production and lab servers are Conventional Magnetic Recording (CMR / PMR) mechanical drives (e.g., Toshiba N300 8 TB, Seagate Constellation CS 3 TB, Seagate Barracuda Green ST2000DL003 2 TB) or SATA SSDs (Samsung 860 EVO 2 TB, Crucial BX100 500 GB). **No SMR (Shingled Magnetic Recording) drives are in use.**
+
+Our mount options and backup configuration are optimized for data integrity, Btrfs snapshot CoW deduplication, SSD longevity, and low-power CPU efficiency:
+- **`rw,async` (Explicit Asynchronous I/O Baseline)**: While standard Linux mount options (`defaults`) include asynchronous I/O, Ansible's `mount` module rejects `defaults` when paired with `boot: false` due to an internal conflict with `auto`. We explicitly specify `rw,async` to lock the asynchronous baseline. Asynchronous I/O allows the Linux kernel page cache to buffer, aggregate, and reorder writes in RAM before dispatching them to the drive controller in efficient sequential flushes.
+- **`compress=zstd:1` (Ultra-Fast Compression & Low-Power CPU Efficiency)**: Lowered from `zstd:3` to `zstd:1`. Level 1 is the fastest Zstandard compression profile in Btrfs. On our low-power Intel quad-core hosts (Celeron / mobile architectures), `zstd:1` processes ~400+ MB/s per core with ~3% CPU usage, whereas level 3 consumes roughly 3x more CPU cycles. Since the primary storage payload consists of pre-compressed photographic RAW libraries (`.CR2`, `.jpeg`, `.xmp`) and system backups, `zstd:1` eliminates write pipeline latency and prevents CPU saturation while still transparently compressing text and metadata extents.
+- **`noatime` (Read Metadata Optimization & SSD Endurance)**: Disables access time updates on read operations. On SSDs (`data` pool), this avoids continuous flash wear. On Btrfs with snapshots, updating atime on read operations would force the kernel to allocate new metadata blocks (CoW), unnecessarily increasing snapshot diff size and disk divergence.
+- **Omission of `autodefrag` (Snapshot CoW Preservation)**: Btrfs `autodefrag` is intentionally omitted. Background defragmentation rewrites fragmented extents into newly allocated contiguous blocks. When files exist in Btrfs snapshots, defragmentation breaks extent sharing between the active subvolume and older snapshots, causing severe disk space inflation (effectively duplicating data). Furthermore, defragmentation is unnecessary and harmful on SSDs.
+- **Rclone Transfer Throttling & Memory Management (`--transfers 4 --checkers 4 --buffer-size 16M`, without `--fast-list`)**: Configured in `rclone-sync-*.service` to pace inbound network transfers, preventing parallel sync threads from overwhelming both the Btrfs writeback queue and mechanical disk head queues over USB buses. Crucially, `--fast-list` is omitted: on large remotes with hundreds of thousands of objects (such as photographic RAW libraries), `--fast-list` retains the entire remote directory hierarchy in memory, ballooning the Go runtime heap past 6.4 GB and starving low-power 8 GB RAM hosts.
+- **Cgroup Memory Isolation (`MemoryHigh=3G`, `MemoryMax=4G`)**: Restricts the maximum resident memory allowable for any single cloud sync service. If memory exceeds 3 GB, systemd throttles the process and reclaims memory pages; if it hits 4 GB, systemd terminates the process via the cgroup OOM killer before it can cause kernel page allocation livelocks, disk I/O thrashing, or network stack unresponsiveness.
+
+##### Historical Note: SMR (Shingled Magnetic Recording) Archival Context
+For historical reference, earlier design phases evaluated mechanical SMR drives (such as retail Seagate Barracuda Compute drives). SMR drives overlap data tracks like roof shingles to increase areal density; modifying existing data requires reading an entire band of overlapping tracks into cache, modifying the target sectors, and rewriting the entire band sequentially (Read-Modify-Write cycle). In such drives, heavy random writes exhaust the small internal CMR cache and cause multi-second latency collapses. While our infrastructure currently runs exclusively on CMR and SSD media, the combination of `rw,async`, `compress=zstd:1`, and transfer throttling ensures that even if an SMR drive were ever introduced as a cold replacement, write streams would remain paced and sequential.
 
 4. **Systemd Backup Services & Timers (`rclone-sync-*` & `btrfs-snapshot-*`)**:
    - Instead of legacy `cron` jobs and wrapper scripts, both cloud synchronization (`rclone`) and local Btrfs snapshots (`snapshot`) are orchestrated by native `systemd.service` and `systemd.timer` units under `/etc/systemd/system/`.
@@ -65,6 +72,7 @@ Our storage configuration specifically accounts for mechanical SMR (Shingled Mag
 | `[Service]` | `Type=` | `oneshot` | Runs the backup command to completion before transitioning to inactive, and **natively prevents concurrent overlapping runs** of the same unit without needing `flock` lockfiles. |
 | `[Service]` | `User=` / `Group=` | `{{ ansible_user }}` (`rclone`) / `root` (`snapshot`) | Runs `rclone` as the unprivileged user, and runs `snapshot.sh` with `CAP_SYS_ADMIN` so expired read-only (`ro`) Btrfs snapshots can be cleared and deleted reliably. |
 | `[Service]` | `SyslogIdentifier=` | `rclone-sync-<name>` / `btrfs-snapshot-<name>` | Tags all standard output and error lines in `systemd-journald` for structured filtering and automatic log rotation (replacing manual `~/logs` files and `find -delete`). |
+| `[Service]` | `MemoryHigh=` / `MemoryMax=` | `3G` / `4G` | (`rclone` only) **Cgroup memory bounding**: Enforces hard caps on sync memory usage. Prevents runaway memory growth or massive metadata trees from starving host RAM (7.6 GB on low-power nodes like Celeron N4100), which would otherwise cause swap thrashing, USB I/O lockup, and frozen network interrupts (loss of ICMP ping and SSH). |
 | `[Service]` | `NoNewPrivileges=` | `true` | Prevents the process and any child processes from acquiring additional privileges via `setuid`/`setgid` binaries or filesystem capabilities. |
 | `[Service]` | `PrivateTmp=` | `true` | Assigns an isolated, private `/tmp` and `/var/tmp` mount namespace to the service that is automatically destroyed when the unit exits. |
 | `[Service]` | `ProtectSystem=` | `strict` | Mounts the entire operating system hierarchy (`/`, `/usr`, `/boot`, `/etc`, `/var`) **read-only** inside the service's private mount namespace. |
@@ -119,6 +127,12 @@ Configures hardware layout and backup targets:
         - "/home/{{ ansible_user }}/data/sync"
         - "/home/{{ ansible_user }}/data/snapshots"
   ```
+- `crypto_no_compression_paths`: Declarative list of directory paths where Btrfs transparent compression should be disabled. Recursively sets the `m` ("don't compress") attribute (`chattr -R +m`), preventing CPU thrashing on uncompressible media (photos, RAW, video streams, audio):
+  ```yaml
+  crypto_no_compression_paths:
+    - "/home/{{ ansible_user }}/backup/sync/googledrive/macbookpro"
+  ```
+- `crypto_perf_flags`: Performance flags passed to `cryptsetup luksOpen` when unlocking LUKS2 devices (defaults to `"--perf-no_read_workqueue --perf-no_write_workqueue"` in `crypto` role defaults). Bypasses asynchronous `[kcryptd]` helper workqueues to execute hardware AES-NI / ARMv8 CE encryption inline on the submitting CPU core, minimizing context switches and latency.
 - `snapshot_jobs`: Declarative list of Btrfs snapshot jobs scheduled via `systemd.timer` (`btrfs-snapshot-<name>.timer` / `.service`):
   ```yaml
   snapshot_jobs:
@@ -142,9 +156,11 @@ Configures hardware layout and backup targets:
         mount: "/home/{{ ansible_user }}/data/sync"
       extra_args:
         - '--user-agent="ISV|rclone.org|rclone/v1.67.0"'
-      # optional schedule & filters:
+      # optional schedule, priority & filters:
       # hour: 4
       # minute: 0
+      # nice: 10
+      # io_priority: 6
       # filters:
       #   - "- .DS_Store"
     - name: custom-sync
@@ -167,6 +183,8 @@ Configures hardware layout and backup targets:
   - Target directory is resolved to `<destination.mount>/<destination.path>` if `destination.path` is provided, otherwise `<destination.mount>/<source.provider>[/<source.path>]`.
   - Resolved target directories must be completely disjoint across all jobs (no two jobs may share or nest target directories).
   - Systemd mount unit dependencies (`Requisite=`, `PartOf=`, `After=`) are dynamically and safely escaped via `systemd-escape --path --suffix=mount`.
+  - `filters`: Optional list of rclone filter rules. Every pattern MUST start with `+ ` (include) or `- ` (exclude), e.g. `"- **.lrdata/**"`, `"- .DS_Store"`.
+  - Process and I/O scheduling priority: Deployed units enforce `Nice=10`, `IOSchedulingClass=best-effort`, and `IOSchedulingPriority=6` by default (configurable globally via `rclone_service_nice` / `rclone_service_io_priority` or per job via `nice` / `io_priority`) to protect interactive SSH sessions and Samba file sharing throughput.
   - Stale or orphaned units (`/etc/systemd/system/rclone-sync-*.{service,timer}`) not present in `rclone_jobs` are stopped, disabled, and removed automatically during playbook runs.
 
 
@@ -227,6 +245,7 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 - **Purpose**: Fast, non-destructive playbook used after server reboot to unlock LUKS containers and mount Btrfs subvolumes.
 - **Target hosts**: `hosts: crypto`
 - **Roles executed**: `crypto` (only decrypts LUKS, scans Btrfs devices, verifies headers, and mounts subvolumes).
+- **Pre-flight Device Assertions**: Before running `cryptsetup luksOpen` under `no_log: true`, the role verifies physical device existence (`ansible.builtin.stat`). If a device symlink (such as `/dev/disk/by-id/ata-*`) is not yet registered by udev (e.g. after a reboot with slow-spinning external USB drives), it triggers `udevadm trigger --settle` as a soft retry before asserting device presence with an unmasked, readable error message.
 - **Usage**:
   ```bash
   uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/storage-unlock.yml
@@ -344,11 +363,11 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 | :--- | :--- | :--- |
 | **`apt`** | Ensures `sudo` and package tools are installed; upgrades system package cache; configures automatic security updates (`unattended-upgrades`). | `apt` cache, `/etc/apt/apt.conf.d/20auto-upgrades` |
 | **`base`** | Installs common utilities (`bash-completion`, `curl`, `git`, `man-db`, `rsync`, `tree`, `unzip`, `wget`), configures the live system hostname via `ansible.builtin.hostname`, and installs customized `.bashrc`. | `/etc/hostname`, `~/.bashrc`, `/root/.bashrc` |
-| **`crypto`** | Manages the full encrypted storage stack across 0, 1, or N volumes (`crypto_disks`) with single or multi-device Btrfs native RAID1: per-device LUKS format/open via memory/stdin, automated LUKS header backups (`/var/backups/luks/`), kernel device scanning (`btrfs device scan`), direct Btrfs formatting with semantic labels and automatic RAID1 mirroring, declarative absolute subvolume mounts with flattened internal subvolume names and zstd compression, label-based fstab integration (`LABEL=<name>`), and monthly Btrfs scrub cron. | `/dev/mapper/<name>-<idx>`, `/var/backups/luks/`, `/etc/fstab` |
+| **`crypto`** | Manages the full encrypted storage stack across 0, 1, or N volumes (`crypto_disks`) with single or multi-device Btrfs native RAID1: per-device LUKS format/open via memory/stdin with inline AES hardware acceleration (`crypto_perf_flags`), automated LUKS header backups (`/var/backups/luks/`), kernel device scanning (`btrfs device scan`), direct Btrfs formatting with semantic labels and automatic RAID1 mirroring, declarative absolute subvolume mounts with flattened internal subvolume names and zstd compression, declarative per-directory non-compression attributes (`crypto_no_compression_paths`), label-based fstab integration (`LABEL=<name>`), and monthly Btrfs scrub cron. | `/dev/mapper/<name>-<idx>`, `/var/backups/luks/`, `/etc/fstab` |
 | **`htop`** | Installs `htop` and seeds initial user configuration (`force: false`). | `~/.config/htop/htoprc` |
 | **`locales`** | Generates `en_US.UTF-8` and `fr_FR.UTF-8` locales, configures English system UI (`LANG=en_US.UTF-8`) with French regional categories (`LC_TIME`, `LC_MEASUREMENT`, `LC_PAPER`, `LC_MONETARY=fr_FR.UTF-8`) in `/etc/locale.conf` (symlinked from `/etc/default/locale`), and configures French AZERTY keyboard (`fr`/`latin9`). | `/etc/locale.conf`, `/etc/default/locale`, `/etc/default/keyboard` |
 | **`ntp`** | Sets timezone (`Europe/Paris`) and configures `chrony` (`fr.pool.ntp.org`, `rtcsync`, `leapseclist`, and `leapsecmode slew` for monotonic leap seconds). | `/etc/chrony/chrony.conf`, `tzdata`, `chrony` service |
-| **`rclone`** | Installs `rclone`, seeds local `~/.config/rclone/rclone.conf` if not already present (`force: false`, `mode: "0600"`, `no_log: true`), and deploys sandboxed `systemd` service and timer units (`rclone-sync-<slug>.{service,timer}`) invoking `/usr/bin/rclone sync` directly with kernel mount protection (`Requisite=`, `BindsTo=`, `AssertPathIsMountPoint=`) and `ProtectSystem=strict`. | `~/.config/rclone/rclone.conf`, `/etc/systemd/system/rclone-sync-*.{service,timer}` |
+| **`rclone`** | Installs `rclone`, seeds local `~/.config/rclone/rclone.conf` if not already present (`force: false`, `mode: "0600"`, `no_log: true`), and deploys sandboxed `systemd` service and timer units (`rclone-sync-<slug>.{service,timer}`) invoking `/usr/bin/rclone sync` directly with kernel mount protection (`Requisite=`, `BindsTo=`, `AssertPathIsMountPoint=`), `ProtectSystem=strict`, and gentle background scheduling (`Nice=10`, `IOSchedulingClass=best-effort`, `IOSchedulingPriority=6`). | `~/.config/rclone/rclone.conf`, `/etc/systemd/system/rclone-sync-*.{service,timer}` |
 | **`runner`** | Installs CI/CD and .NET runtime dependencies (`git`, `curl`, `jq`, `shellcheck`, `rsync`, `libicu-dev`, `libssl-dev`), copies local `~/.ansible_vault_pass` (`mode: "0600"`, `no_log: true`) and `~/.config/rclone/rclone.conf` (`mode: "0600"`, `no_log: true`), generates `/home/{{ ansible_user }}/.ssh/id_ed25519` on the runner, adds `debian.delarche.fr` to `known_hosts`, authorizes the runner's public key on `debian.delarche.fr`, and installs/upgrades the official GitHub Actions Runner (`actions/runner`) release in `/opt/actions-runner`. | `/opt/actions-runner`, `~/.ansible_vault_pass`, `~/.config/rclone/rclone.conf`, `~/.ssh/id_ed25519` |
 | **`samba`** | Deploys Samba SMB3 service on `crypto` hosts: serves Btrfs subvolumes in read-only mode with native Windows and macOS Previous Versions support via `vfs_shadow_copy2` mapped to `btrfs-snapshot` retention directories, provisions vault-encrypted credentials via `smbpasswd`, ensures `~/data/sync/mac` target directory exists when mounted, and configures LAN-restricted UFW firewall rules (port 445/tcp). | `/etc/samba/smb.conf`, `smbd` service, `/home/{{ ansible_user }}/data/sync/mac` |
 | **`snapshot`** | Manages Btrfs snapshot automation: deploys streamlined `/home/{{ ansible_user }}/bin/snapshot.sh` (30 daily + 52 weekly ISO retention) and configures sandboxed `systemd` service and timer units (`btrfs-snapshot-<name>.{service,timer}`) with dual mount binding and read-only source protection (`ProtectSystem=strict`, `ReadWritePaths={{ item.destination }}`). | `/home/{{ ansible_user }}/bin/snapshot.sh`, `/etc/systemd/system/btrfs-snapshot-*.{service,timer}` |

@@ -35,6 +35,11 @@
   - Encrypt all secrets using `ansible-vault` with password file `~/.ansible_vault_pass` (enforced by the `check-ansible-vault` pre-commit hook).
   - Reference documented variables in `ansible/vault.yml.example`.
 
+- **Documentation Standards (Mandatory & Systematic)**:
+  - **Documentation updates are mandatory and systematic for every single code or configuration change**: Every contribution, feature addition, role enhancement, or configuration variable modification MUST systematically update the relevant documentation (`docs/ansible.md`, `README.md`, `docs/disaster-recovery.md`, etc.) in the same pull request.
+  - Any new role variable in `defaults/main.yml` (e.g. `crypto_no_compression_paths`, `crypto_perf_flags`, `rclone_service_nice`), new playbook, task, or operational behavior change must be fully documented with its purpose, default value, YAML schema, and architectural rationale.
+  - Never treat documentation as an afterthought; documentation parity is a hard requirement for completing any task.
+
 - **Pre-commit & Code Quality**:
   - All contributions must pass `uv run pre-commit run --all-files` with a clean exit code (`0`).
   - Linters enforced at maximum strictness: `ansible-lint --strict` (`profile: production`), `yamllint --strict` (`level: error`), `shellcheck --severity=style`, `check-ansible-vault`, and `pre-commit-hooks` (`v5.0.0`).
@@ -48,10 +53,14 @@
   - Every pool in `crypto_disks` must declare `name` (used as Btrfs `LABEL`, LUKS mapper prefix `<name>-<idx>`, and header backup filename), `devices` (list of block devices, preferring `/dev/disk/by-id/...`), and `subvolumes` (mandatory list of absolute mount paths).
   - Do not use implicit base directories (`crypto_base_dir`) or implicit default subvolume lists (`btrfs_default_subvolumes`).
   - Internal Btrfs subvolume names are deterministically derived by flattening the absolute mount path with underscores (`subvol | regex_replace('^/+', '') | regex_replace('/+$', '') | replace('/', '_')`), e.g., `/home/olivier/data/sync` $\rightarrow$ `subvol=home_olivier_data_sync`.
+  - Hardware-accelerated AES processing bypasses async dm-crypt helper workqueues (`--perf-no_read_workqueue --perf-no_write_workqueue`) by default via `crypto_perf_flags`. Declarative uncompressed directories can be configured per host via `crypto_no_compression_paths` (`chattr -R +m`).
 - **Backup & Sync (`snapshot_jobs` & `rclone_jobs`)**:
-  - Scheduled and sandboxed exclusively via native `systemd.service` and `systemd.timer` units (`/etc/systemd/system/btrfs-snapshot-<name>.{service,timer}` and `/etc/systemd/system/rclone-sync-<slug>.{service,timer}`), bound to their underlying Btrfs `.mount` units (`Requisite=`, `PartOf=`, `After=`, `AssertPathIsMountPoint=`) and isolated with `ProtectSystem=strict`, `ProtectHome=read-only`, and explicit `ReadWritePaths=`.
-  - `rclone` copies the controller's `~/.config/rclone/rclone.conf` to `/home/{{ ansible_user }}/.config/rclone/rclone.conf` if not already present (`force: false`, `mode: "0600"`, `no_log: true`) and invokes `/usr/bin/rclone sync` directly (zero shell wrapper). `snapshot` deploys `/home/{{ ansible_user }}/bin/snapshot.sh` for snapshot creation and daily/ISO-weekly pruning.
+  - Scheduled and sandboxed exclusively via native `systemd.service` and `systemd.timer` units (`/etc/systemd/system/btrfs-snapshot-<name>.{service,timer}` and `/etc/systemd/system/rclone-sync-<slug>.{service,timer}`), bound to their underlying Btrfs `.mount` units (`Requisite=`, `PartOf=`, `After=`, `AssertPathIsMountPoint=`) and isolated with `ProtectSystem=strict`, `ProtectHome=read-only`, explicit `ReadWritePaths=`, process/IO scheduling priority (`Nice=10`, `IOSchedulingClass=best-effort`, `IOSchedulingPriority=6`), and cgroup memory boundaries (`MemoryHigh=3G`, `MemoryMax=4G`).
+  - `rclone` copies the controller's `~/.config/rclone/rclone.conf` to `/home/{{ ansible_user }}/.config/rclone/rclone.conf` if not already present (`force: false`, `mode: "0600"`, `no_log: true`) and invokes `/usr/bin/rclone sync` directly (zero shell wrapper, throttled via `--transfers 4`, `--checkers 4`, `--buffer-size 16M`, and strictly avoiding `--fast-list` to prevent fatal Go runtime heap exhaustion on nodes with $\le$ 8 GB RAM). `snapshot` deploys `/home/{{ ansible_user }}/bin/snapshot.sh` for snapshot creation and daily/ISO-weekly pruning.
   - `snapshot_jobs` (`source`, `destination`) must specify explicit absolute paths. `rclone_jobs` requires `name` (unique identifier matching `^[a-z0-9][a-z0-9-]*$`), `source.provider`, and `destination.mount` (explicit absolute path matching an declared `crypto_disks[*].subvolumes`). Optional subpaths can be specified via `source.path` and `destination.path` (relative, non-empty, without `..`). Resolved target directories must never overlap across jobs, orphan systemd units are automatically cleaned up, and underlying `.mount` unit names are resolved dynamically via `systemd-escape`.
+- **Samba File Sharing (`samba_shares`)**:
+  - Exposes declared Btrfs subvolumes to the LAN (`samba_allowed_subnet`) as secure, read-only (`read_only: true` by default) SMB3 shares with native Btrfs snapshot browsing (`vfs_shadow_copy2`).
+  - Integrates Apple SMB (AAPL) extensions by default (`fruit: true`) using strict VFS module order `vfs objects = catia fruit streams_xattr shadow_copy2` (`fruit:aapl = yes`, `fruit:encoding = native`, `fruit:metadata = stream`, `fruit:model = Macmini`), storing macOS resource forks and attributes as extended attributes without `._*` dot-underscore pollution.
 
 ---
 
@@ -66,8 +75,9 @@ Playbooks are strictly separated by operational responsibility (no role duplicat
 6. `ansible/storage-disk-add.yml`: Appends a new member disk to an encrypted Btrfs storage pool (`hosts: crypto`), supporting single-to-RAID1 conversion or RAID1 expansion with filtered balance.
 7. `ansible/storage-disk-remove.yml`: Removes a member disk from an encrypted Btrfs storage pool (`hosts: crypto`), supporting RAID1 shrinking or RAID1-to-single conversion with live mapper index compaction.
 8. `ansible/storage-remove.yml`: Targeted permanent decommissioning and wiping of an encrypted storage pool (`hosts: crypto`), supporting interactive pool selection or `-e remove_pool=<pool> -e confirm_remove=yes`.
-9. `ansible/backup.yml`: Deploys `snapshot` and `rclone` `systemd.service` and `systemd.timer` units (`hosts: crypto`).
-10. `ansible/status.yml`: Read-only health reporting across `base`, `locales`, `ntp`, `sshd`, `ufw` (`hosts: all`), `crypto`, `snapshot`, `rclone`, `samba` (`hosts: crypto`), and `runner` (`hosts: runner`) roles (supports `--tags base|locales|ntp|sshd|ufw|crypto|snapshot|rclone|samba|runner`).
+9. `ansible/storage-normalize-unicode.yml`: Normalizes filenames to UTF-8 NFC via `convmv` for Samba and macOS client compatibility (`hosts: crypto`), supporting `-e target_path=<path>`.
+10. `ansible/backup.yml`: Deploys `snapshot` and `rclone` `systemd.service` and `systemd.timer` units (`hosts: crypto`).
+11. `ansible/status.yml`: Read-only health reporting across `base`, `locales`, `ntp`, `sshd`, `ufw` (`hosts: all`), `crypto`, `snapshot`, `rclone`, `samba` (`hosts: crypto`), and `runner` (`hosts: runner`) roles (supports `--tags base|locales|ntp|sshd|ufw|crypto|snapshot|rclone|samba|runner`).
 
 ---
 

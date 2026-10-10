@@ -24,12 +24,12 @@ flowchart LR
             MacDir["~/data/sync/mac\n(Mac Backups)"]
             Snap["~/data/snapshots\n(Daily + Weekly Snapshots)"]
         end
-        Samba -->|"vfs_shadow_copy2"| Snap
+        Samba -->|"catia, fruit, streams_xattr, shadow_copy2"| Storage
         Samba -->|"Read-Only Share"| Sync
         Sync --- MacDir
     end
 
-    Finder -->|"SMB3 (Read-Only + Previous Versions)"| Samba
+    Finder -->|"SMB3 + AAPL (Read-Only + Previous Versions)"| Samba
     Launchd --> Rsync
     Rsync -->|"Push over SSH"| SSH
     SSH --> MacDir
@@ -45,10 +45,10 @@ The servers expose the `/home/olivier/data/sync` directory as a secure, read-onl
 
 1. In macOS Finder, press **`Cmd + K`** (or go to **Go** $\rightarrow$ **Connect to Server...**).
 2. Enter the server address:
-   ```text
-   smb://kodlix.delarche.fr/data
-   ```
-   *(or `smb://zotac.delarche.fr/data` / `smb://debian.delarche.fr/data` for lab).*
+   - Live working tree: `smb://zotac.delarche.fr/data` (or `kodlix.delarche.fr/data`)
+   - Snapshot history: `smb://zotac.delarche.fr/data-snapshots` (or `kodlix.delarche.fr/data-snapshots`)
+   - Backup working tree: `smb://zotac.delarche.fr/backup`
+   - Backup snapshot history: `smb://zotac.delarche.fr/backup-snapshots`
 3. Click **Connect**.
 4. When prompted for credentials, select **Registered User**:
    - **Name**: `olivier`
@@ -61,24 +61,73 @@ The servers expose the `/home/olivier/data/sync` directory as a secure, read-onl
 > [!NOTE]
 > **Read-Only Share**: The SMB share is strictly read-only (`read only = yes`). This prevents accidental deletions, ransomware encryption, or modifications from client workstations. All data writes to the server must be performed via `rsync` over SSH.
 
+### 🍎 Apple SMB (AAPL) VFS Extensions & Share Options
+
+Samba shares are configured with native Apple SMB protocol extensions using a strict VFS object order:
+```ini
+vfs objects = catia fruit streams_xattr shadow_copy2
+fruit:aapl = yes
+fruit:encoding = native
+fruit:metadata = stream
+fruit:model = Macmini
+```
+
+- **`catia`**: Translates characters reserved by macOS/Windows (such as `:`, `?`, `*`) into valid POSIX filenames.
+- **`fruit`**: Implements Apple AAPL extensions:
+  - `fruit:aapl = yes`: Activates SMB2+ AAPL create contexts and high-performance directory caching.
+  - `fruit:encoding = native`: Ensures filenames remain in UTF-8 NFC on the Linux filesystem without destructive mangling.
+  - `fruit:metadata = stream`: Redirects macOS resource forks and Finder attributes into filesystem alternate data streams (`streams_xattr`) rather than polluting directories with AppleDouble `._*` sidecar files.
+  - `fruit:model = Macmini`: Displays the native Apple hardware icon in the macOS Finder sidebar and network browser.
+- **`streams_xattr`**: Stores Apple alternate streams and NTFS metadata in Linux extended attributes (`user.*` xattrs).
+- **`shadow_copy2`**: Exposes server-side Btrfs snapshots as native macOS/Windows "Previous Versions".
+
+#### Declarative Share Configuration Schema (`samba_shares`)
+
+Each share entry in `host_vars/<host>/main.yml` supports:
+- `name` *(required)*: Identifier of the share exposed on the network (e.g., `data`, `backup`).
+- `path` *(required)*: Absolute directory path on the server (e.g., `/home/olivier/data/sync`).
+- `snapdir` *(required)*: Absolute path to snapshot storage (e.g., `/home/olivier/data/snapshots`).
+- `comment` *(optional)*: Share description (default: `Btrfs share with Previous Versions`).
+- `read_only` *(optional, bool)*: Enforces read-only access (default: `true`).
+- `browseable` *(optional, bool)*: Controls visibility in network browsing (default: `true`).
+- `guest_ok` *(optional, bool)*: Permits unauthenticated guests (default: `false`).
+- `valid_users` *(optional, string)*: Authorized login usernames (default: `{{ ansible_user }}`).
+- `fruit` *(optional, bool)*: Enables Apple VFS extensions (default: `true`).
+- `fruit_model` *(optional, string)*: Hardware icon displayed in Finder (default: `Macmini`, e.g., `MacBookPro`, `iMac`, `TimeCapsule`).
+
 ---
 
-## 🕒 2. Browsing & Restoring Snapshots (Previous Versions)
+## 🕒 2. Browsing & Restoring Snapshots (macOS Finder vs. Windows)
 
-Samba is integrated directly with Btrfs snapshots via the `vfs_shadow_copy2` module. Every daily and weekly snapshot taken by `snapshot.sh` on the server is exposed to macOS as a native "Previous Version".
+The Samba server integrates Btrfs snapshots via the `vfs_shadow_copy2` module. However, macOS and Windows handle this protocol differently:
 
-### How to Browse Snapshots in Finder
+### ⚠️ The macOS Finder Limitation
+> [!IMPORTANT]
+> **No Native "Previous Versions" Menu in macOS Finder**:
+> The "Previous Versions" (*Versions précédentes*) contextual menu is a **Windows Explorer-only feature** based on the Microsoft Remote Shadow Copy protocol (`FSCTL_SRV_ENUM_SNAPS`).
+> **Apple has never implemented this Windows Shadow Copy GUI inside macOS Finder**. Therefore, when right-clicking a file in Finder on a Mac, you will **not** find a "Show Previous Versions" option.
 
-1. Inside the mounted share in Finder, locate any file or folder.
-2. **Right-click** (or Control-click) the file or folder.
-3. Select **"Show Previous Versions"** (or **"Versions précédentes"** if your macOS language is French).
-4. A native sheet displays the historical timeline of snapshots (dated `YYYY-MM-DD--HH-MM-SS`).
-5. Double-click any snapshot version to view the exact state of that file or folder at that point in time.
+### 🍏 How to Browse Snapshots on macOS
 
-### How to Restore a File
+Since macOS Finder does not expose Shadow Copies natively in its contextual menu, snapshots can be browsed in two ways:
 
-- **To recover a previous version**: Simply drag and drop or copy the file from the snapshot view to your local Mac disk (e.g., your Desktop or Documents folder).
-- Because the share is read-only, you cannot overwrite files directly on the share from the snapshot window. Instead, copy the desired version to your Mac, make any needed edits, and sync it back to the server using `rsync`.
+1. **Dedicated Read-Only Snapshot Shares (Recommended for Finder)**:
+   Exposing snapshot directories as dedicated read-only Samba shares (e.g. `smb://<server>/data-snapshots` or `smb://<server>/backup-snapshots`).
+   When connecting to this share in Finder via **Cmd + K**, you see each point-in-time snapshot as a standard read-only folder:
+   - `2026-10-04--05-00-07/`
+   - `2026-10-05--05-00-07/`
+   - `2026-10-06--05-00-07/`
+   You can open any dated folder, navigate the exact historical directory tree, and drag-and-drop older files directly back to your Mac.
+
+2. **Via SSH or SFTP (Cyberduck / FileZilla / Terminal)**:
+   Connect over SFTP to browse `/home/olivier/data/snapshots` and `/home/olivier/backup/snapshots` directly.
+
+### 🪟 How to Browse Snapshots on Windows Clients
+On a Windows workstation connected to `\\<server>\data`:
+1. Right-click any file or folder and select **Properties**.
+2. Switch to the **Previous Versions** (*Versions précédentes*) tab.
+3. Windows Explorer queries Samba's `vfs_shadow_copy2` module and displays the historical timeline.
+4. Select a timestamp and click **Open** or **Restore**.
 
 ---
 
