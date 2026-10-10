@@ -23,6 +23,9 @@
       for mp in $(awk '$1 == "LABEL={{ crypto_disk_name }}" {print $2}' /etc/fstab); do
         umount "$mp" 2>/dev/null || true
       done
+      for subvol in {% for s in crypto_disk_subvolumes %}"{{ s }}" {% endfor %}; do
+        umount "$subvol" 2>/dev/null || true
+      done
       sed -i '/^LABEL={{ crypto_disk_name }}[[:space:]]/d' /etc/fstab
   changed_when: true
 

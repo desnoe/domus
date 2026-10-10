@@ -464,14 +464,14 @@ flowchart LR
 - **Commands**:
   ```bash
   ssh olivier@debian.delarche.fr "set -e
-  testparm -s 2>/dev/null | grep -q 'vfs objects = shadow_copy2'
+  testparm -s 2>/dev/null | grep 'vfs objects' | grep -q 'shadow_copy2'
   testparm -s 2>/dev/null | grep -q 'shadow:format = %Y-%m-%d--%H-%M-%S'
   count=\"\$(find /home/olivier/data/snapshots -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')\"
   test \"\${count}\" -ge 1
   "
   ```
 - **Expected Result**:
-  - `testparm` outputs show `vfs objects = shadow_copy2` and proper format.
+  - `testparm` outputs show `shadow_copy2` in `vfs objects` and proper format.
   - At least one valid Btrfs snapshot exists in the destination directory.
 
 ---
@@ -619,8 +619,8 @@ flowchart LR
   echo 'RAID1_DEGRADED_RECOVERY_OK' > /home/olivier/backup/sync/corner_case_test.txt && sync
   sudo umount /home/olivier/backup/sync /home/olivier/backup/snapshots
   sudo cryptsetup luksClose backup-1
-  sudo wipefs -a /dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3
-  sudo dd if=/dev/zero of=/dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3 bs=1M count=16 status=none
+  sudo wipefs -a /dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK
+  sudo dd if=/dev/zero of=/dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK bs=1M count=16 status=none
   "
   ANSIBLE_HOME=/tmp/.ansible uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-replace.yml -e confirm_replace=yes
   ssh olivier@debian.delarche.fr "cat /home/olivier/backup/sync/corner_case_test.txt && sudo btrfs scrub start -B /home/olivier/backup/sync && rm -f /home/olivier/backup/sync/corner_case_test.txt"
@@ -639,10 +639,10 @@ flowchart LR
   echo 'HEADER_RESTORE_OK' > /home/olivier/backup/sync/header_test.txt && sync
   sudo umount /home/olivier/backup/sync /home/olivier/backup/snapshots
   sudo cryptsetup luksClose backup-1
-  sudo dd if=/dev/zero of=/dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3 bs=1M count=2 conv=notrunc status=none
-  ! sudo cryptsetup isLuks /dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3 && echo CORRUPTION_CONFIRMED
-  sudo cryptsetup luksHeaderRestore /dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3 --header-backup-file /var/backups/luks/luks-header-backup-1.img --batch-mode
-  sudo cryptsetup isLuks /dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3 && echo HEADER_RESTORED_OK
+  sudo dd if=/dev/zero of=/dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK bs=1M count=2 conv=notrunc status=none
+  ! sudo cryptsetup isLuks /dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK && echo CORRUPTION_CONFIRMED
+  sudo cryptsetup luksHeaderRestore /dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK --header-backup-file /var/backups/luks/luks-header-backup-1.img --batch-mode
+  sudo cryptsetup isLuks /dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK && echo HEADER_RESTORED_OK
   "
   ANSIBLE_HOME=/tmp/.ansible uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-unlock.yml
   ssh olivier@debian.delarche.fr "cat /home/olivier/backup/sync/header_test.txt && sudo btrfs scrub start -B /home/olivier/backup/sync && rm -f /home/olivier/backup/sync/header_test.txt"

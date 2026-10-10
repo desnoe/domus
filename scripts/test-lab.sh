@@ -211,9 +211,19 @@ EOF
         --max-protocol=SMB3 \
         -c "ls" | grep -q '\.'
 
+    smbclient "//${LAB_HOST}/data-snapshots" \
+        -U "${LAB_USER}%${samba_pass}" \
+        --max-protocol=SMB3 \
+        -c "ls" | grep -q '\.'
+
+    smbclient "//${LAB_HOST}/backup-snapshots" \
+        -U "${LAB_USER}%${samba_pass}" \
+        --max-protocol=SMB3 \
+        -c "ls" | grep -q '\.'
+
     # TC-SMB-03: Shadow copies configuration & snapshot verification
     run_remote << 'EOF'
-testparm -s 2>/dev/null | grep -q 'vfs objects = shadow_copy2'
+testparm -s 2>/dev/null | grep 'vfs objects' | grep -q 'shadow_copy2'
 testparm -s 2>/dev/null | grep -q 'shadow:format = %Y-%m-%d--%H-%M-%S'
 count="$(find /home/olivier/data/snapshots -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')"
 test "${count}" -ge 1
@@ -236,6 +246,14 @@ EOF
         exit 1
     fi
 
+    if smbclient "//${LAB_HOST}/data-snapshots" \
+        -U "${LAB_USER}%${samba_pass}" \
+        --max-protocol=SMB3 \
+        -c "put /dev/null test_write_must_fail" 2>&1; then
+        echo "ERROR: Expected write to fail on read-only data-snapshots share, but it succeeded" >&2
+        exit 1
+    fi
+
     # TC-SMB-07: Minimum SMB3 protocol enforcement (NT1 / SMB1 must be rejected)
     if smbclient "//${LAB_HOST}/data" \
         -U "${LAB_USER}%${samba_pass}" \
@@ -248,7 +266,7 @@ EOF
 
 step_corner_cases_and_raid1() {
     run_remote << 'EOF'
-readonly BACKUP_DISK_1="/dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3"
+readonly BACKUP_DISK_1="/dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK"
 
 # TC-ADV-01: Unmounted 0ms refusal (Requisite= + AssertPathIsMountPoint=)
 sudo umount /home/olivier/data/sync
@@ -285,7 +303,7 @@ EOF
     uv run ansible-playbook -i "${LAB_INVENTORY}" ansible/storage-unlock.yml
 
     run_remote << 'EOF'
-readonly BACKUP_DISK_1="/dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3"
+readonly BACKUP_DISK_1="/dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK"
 
 # TC-ADV-05 / TC-STO-04: Simulate complete disk replacement (wipefs + zero first 16 MiB)
 sudo umount /home/olivier/backup/sync /home/olivier/backup/snapshots
@@ -307,8 +325,8 @@ EOF
         -e remove_pool=backup -e confirm_remove=yes
 
     run_remote << 'EOF'
-readonly BACKUP_DISK_0="/dev/disk/by-id/ata-VBOX_HARDDISK_VB3a4d115e-5d14d18f"
-readonly BACKUP_DISK_1="/dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3"
+readonly BACKUP_DISK_0="/dev/disk/by-id/ata-debian-3_SSD_5E6AYTKT29XMK1XHWJ78"
+readonly BACKUP_DISK_1="/dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK"
 
 ! mountpoint -q /home/olivier/backup/sync
 [ ! -e /dev/mapper/backup-0 ]
@@ -329,7 +347,7 @@ EOF
         -e pool=backup -e disk_index=0 -e confirm_remove=yes
 
     run_remote << 'EOF'
-readonly BACKUP_DISK_0="/dev/disk/by-id/ata-VBOX_HARDDISK_VB3a4d115e-5d14d18f"
+readonly BACKUP_DISK_0="/dev/disk/by-id/ata-debian-3_SSD_5E6AYTKT29XMK1XHWJ78"
 
 sudo btrfs filesystem df /home/olivier/backup/sync | grep -q 'Data, single'
 [ -e /dev/mapper/backup-0 ]
@@ -341,11 +359,11 @@ EOF
 
     # TC-STO-07: Member disk addition & RAID1 conversion via storage-disk-add.yml
     uv run ansible-playbook -i "${LAB_INVENTORY}" ansible/storage-disk-add.yml \
-        -e pool=backup -e device=/dev/disk/by-id/ata-VBOX_HARDDISK_VB3a4d115e-5d14d18f -e confirm_add=yes
+        -e pool=backup -e device=/dev/disk/by-id/ata-debian-3_SSD_5E6AYTKT29XMK1XHWJ78 -e confirm_add=yes
 
     run_remote << 'EOF'
-readonly BACKUP_DISK_0="/dev/disk/by-id/ata-VBOX_HARDDISK_VB3a4d115e-5d14d18f"
-readonly BACKUP_DISK_1="/dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3"
+readonly BACKUP_DISK_0="/dev/disk/by-id/ata-debian-3_SSD_5E6AYTKT29XMK1XHWJ78"
+readonly BACKUP_DISK_1="/dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK"
 
 sudo btrfs filesystem df /home/olivier/backup/sync | grep -q 'Data, RAID1'
 [ -e /dev/mapper/backup-0 ]

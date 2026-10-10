@@ -15,6 +15,12 @@
     state: stopped
   failed_when: false
 
+- name: "Stop Samba service during pool removal to release active client connections: {{ crypto_target_pool }}"
+  ansible.builtin.systemd:
+    name: smbd
+    state: stopped
+  failed_when: false
+
 - name: "Unmount all subvolumes for pool: {{ crypto_target_pool }}"
   become: true
   ansible.builtin.shell:
@@ -78,6 +84,13 @@
   loop: "{{ crypto_pool_to_remove.devices }}"
   loop_control:
     index_var: idx
+
+- name: "Restart Samba service after pool removal: {{ crypto_target_pool }}"
+  become: true
+  ansible.builtin.systemd:
+    name: smbd
+    state: started
+  failed_when: false
 
 - name: Display post-removal notice
   ansible.builtin.debug:

@@ -20,7 +20,20 @@
         msg: "Aborting: Wipe confirmation not given ('WIPE' required, or confirm_wipe=yes extra var)."
       when: not crypto_wipe_confirmed
 
+    - name: Stop Samba service during wipe to release active client connections
+      ansible.builtin.systemd:
+        name: smbd
+        state: stopped
+      failed_when: false
+
   vars:
     crypto_wipe: true
   roles:
     - crypto
+
+  post_tasks:
+    - name: Restart Samba service after storage wipe and re-creation
+      ansible.builtin.systemd:
+        name: smbd
+        state: started
+      failed_when: false

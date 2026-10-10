@@ -254,7 +254,7 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 ### 4. `ansible/storage-wipe-and-reset.yml`
 - **Purpose**: Destructive playbook used when provisioning new storage or resetting an entire storage pool.
 - **Target hosts**: `hosts: crypto`
-- **Safety**: Includes interactive confirmation prompt (or `-e "confirm_wipe=yes"`).
+- **Safety**: Includes interactive confirmation prompt (or `-e "confirm_wipe=yes"`). Stops the Samba daemon (`smbd`) during wipe to release active SMB client locks on exported subvolumes and restarts it upon pool re-creation.
 - **Action**: Unmounts subvolumes, formats LUKS on member devices, creates multi-device Btrfs RAID1 filesystem, creates subvolumes (`sync`, `snapshots`), and mounts in `/etc/fstab`.
 - **Usage**:
   ```bash
