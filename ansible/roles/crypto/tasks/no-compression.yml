@@ -1,0 +1,31 @@
+---
+- name: "Ensure non-compression directory exists: {{ crypto_no_comp_path }}"
+  ansible.builtin.file:
+    path: "{{ crypto_no_comp_path }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+  loop: "{{ crypto_no_compression_paths }}"
+  loop_control:
+    loop_var: crypto_no_comp_path
+
+- name: "Check compression attribute on directory: {{ crypto_no_comp_path }}"
+  ansible.builtin.command:
+    cmd: "lsattr -d {{ crypto_no_comp_path }}"
+  register: crypto_no_comp_lsattr
+  changed_when: false
+  loop: "{{ crypto_no_compression_paths }}"
+  loop_control:
+    loop_var: crypto_no_comp_path
+
+- name: "Disable compression recursively on directory: {{ crypto_no_comp_item.crypto_no_comp_path }}"
+  become: true
+  ansible.builtin.command:
+    cmd: "chattr -R +m {{ crypto_no_comp_item.crypto_no_comp_path }}"
+  when: "'m' not in crypto_no_comp_item.stdout.split()[0]"
+  changed_when: true
+  loop: "{{ crypto_no_comp_lsattr.results }}"
+  loop_control:
+    loop_var: crypto_no_comp_item
+    label: "{{ crypto_no_comp_item.crypto_no_comp_path }}"

@@ -26,7 +26,7 @@
   become: true
   no_log: true
   ansible.builtin.command:
-    cmd: "cryptsetup luksOpen {{ crypto_add_device }} {{ crypto_target_pool }}-{{ crypto_new_dev_idx }} --key-file -"
+    cmd: "cryptsetup luksOpen {{ crypto_add_device }} {{ crypto_target_pool }}-{{ crypto_new_dev_idx }} --key-file - {{ crypto_perf_flags | default('') }}"
     stdin: "{{ crypto_disk_passphrase }}"
   changed_when: true
 

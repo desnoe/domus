@@ -1,0 +1,35 @@
+---
+- name: Normalize Unicode filenames to NFC for Samba and macOS compatibility
+  hosts: crypto
+  become: true
+  vars:
+    storage_normalize_default_path: "/home/{{ ansible_user }}/backup/sync/googledrive/macbookpro"
+    storage_normalize_paths: >-
+      {{
+        [target_path] if target_path is defined
+        else [storage_normalize_default_path]
+      }}
+  tasks:
+    - name: Install convmv package
+      ansible.builtin.apt:
+        name:
+          - convmv
+        state: present
+
+    - name: Check if target paths exist
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: storage_normalize_stat_results
+      loop: "{{ storage_normalize_paths }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Convert filenames to UTF-8 NFC normalization
+      when: item.stat.exists and item.stat.isdir
+      ansible.builtin.command:
+        cmd: "convmv -r -f utf8 -t utf8 --nfc --notest {{ item.stat.path }}"
+      register: storage_normalize_convmv_cmd
+      changed_when: "'Ready!' in storage_normalize_convmv_cmd.stdout"
+      loop: "{{ storage_normalize_stat_results.results }}"
+      loop_control:
+        label: "{{ item.item }}"

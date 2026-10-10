@@ -521,3 +521,65 @@ Btrfs prohibits removing a drive from a 2-disk RAID1 pool while the RAID1 profil
 
 6. **Update Ansible Host Variables**:
    Remove `/dev/disk/by-id/<removed-disk>` from `devices` in `host_vars/<hostname>/main.yml`, leaving a single device entry at index 0.
+
+---
+
+## 🔌 Scenario 9: Troubleshooting Missing `/dev/disk/by-id/ata-*` on External USB Enclosures
+
+### Symptoms
+After a server reboot, `storage-unlock.yml` or `cryptsetup luksOpen` fails with:
+```text
+Device /dev/disk/by-id/ata-<model>_<serial> does not exist or access denied.
+```
+Inspecting `/dev/disk/by-id/` shows that `usb-*` symlinks exist (e.g. `usb-ST2000DL_003-9VT166_0000000000000001-0:0`), but the expected `ata-*` links referencing the drive's serial number are missing.
+
+### Root Cause
+1. **Multi-Bay USB Enclosure Architecture**: Multi-bay USB 3.x storage enclosures (such as those using VIA Labs VL817/VL822 or ASMedia bridges) connect individual SATA bridge chips behind an internal USB hub.
+2. **Drive Spin-Up Timing & SAT Probing**: On boot, mechanical hard drives (especially 5400/5900 RPM drives) require 5 to 10 seconds to spin up from standby. When `systemd-udevd` initializes devices during early kernel boot, it executes `/lib/udev/ata_id --export /dev/sdX` using SCSI ATA PASS-THROUGH (12-byte `0xa1`).
+3. **Missing Symlink**: If the drive is still spinning up or if the USB bridge temporarily negotiated High-Speed (USB 2.0) instead of SuperSpeed (USB 3.0), `ata_id` fails (exit code 1). Consequently, udev creates the `usb-*` symlink (derived from the enclosure's slot serial) but omits the `ata-*` symlink (derived from ATA IDENTIFY).
+
+### Diagnostic Procedure
+
+1. **Verify available disk symlinks**:
+   ```bash
+   ls -l /dev/disk/by-id/
+   ```
+
+2. **Check USB hub topology and negotiated speeds**:
+   ```bash
+   lsusb -t
+   ```
+   Check whether the enclosure bridges are enumerated under the SuperSpeed hub (5000M) or fell back to the High-Speed hub (480M).
+
+3. **Verify the drive is alive via SAT pass-through**:
+   ```bash
+   sudo smartctl -i /dev/sdX
+   ```
+   If `smartctl` reports the drive model and serial number cleanly, the hardware and drive are fully operational.
+
+### Resolution Steps
+
+1. **Reset the USB hub controller**:
+   Trigger a software USB reset on the enclosure hub to force a clean re-enumeration now that all mechanical drives are fully spun up:
+   ```bash
+   # Example: Reset VIA Labs USB 2.0 / USB 3.0 Hub
+   sudo usbreset 2109:2822
+   ```
+
+2. **Trigger and settle udev**:
+   Force udev to re-evaluate rules and re-run `ata_id`:
+   ```bash
+   sudo udevadm trigger --settle
+   ```
+
+3. **Confirm symlink restoration**:
+   ```bash
+   ls -l /dev/disk/by-id/ata-*
+   ```
+   All member drive symlinks will now point to their corresponding `/dev/sd*` nodes.
+
+4. **Unlock storage**:
+   Run the standard unlock playbook:
+   ```bash
+   uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/storage-unlock.yml
+   ```

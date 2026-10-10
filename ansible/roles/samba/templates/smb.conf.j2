@@ -27,15 +27,27 @@
 [{{ share.name }}]
    comment = {{ share.comment | default('Btrfs share with Previous Versions') }}
    path = {{ share.path }}
-   browseable = yes
-   read only = yes
-   guest ok = no
-   valid users = {{ ansible_user }}
+   browseable = {{ 'no' if (share.browseable is defined and not share.browseable) else 'yes' }}
+   read only = {{ 'no' if (share.read_only is defined and not share.read_only) else 'yes' }}
+   guest ok = {{ 'yes' if (share.guest_ok is defined and share.guest_ok) else 'no' }}
+   valid users = {{ share.valid_users | default(ansible_user) }}
+{% if share.fruit | default(true) %}
+   # Apple SMB (AAPL) extensions: catia, fruit, and streams_xattr MUST precede shadow_copy2
+   vfs objects = catia fruit streams_xattr{{ ' shadow_copy2' if (share.snapdir is defined and share.snapdir | length > 0) else '' }}
+   fruit:aapl = yes
+   fruit:encoding = native
+   fruit:metadata = stream
+   fruit:model = {{ share.fruit_model | default('Macmini') }}
+{% elif share.snapdir is defined and share.snapdir | length > 0 %}
    vfs objects = shadow_copy2
+{% endif %}
+{% if share.snapdir is defined and share.snapdir | length > 0 %}
+   # Btrfs snapshot browsing (Previous Versions)
    shadow:snapdir = {{ share.snapdir }}
    shadow:basedir = {{ share.path }}
    shadow:format = %Y-%m-%d--%H-%M-%S
    shadow:sort = desc
    shadow:localtime = yes
+{% endif %}
 
 {% endfor %}

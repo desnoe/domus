@@ -2,18 +2,27 @@
 crypto_wipe: false
 
 # Default mount options for Btrfs subvolumes in /etc/fstab:
-# - rw,async: Explicitly locks read-write and asynchronous I/O mode (critical for SMR
-#   drives such as Seagate Barracuda, allowing the kernel page cache to buffer and
-#   schedule writes sequentially before flushing, avoiding process stalls).
+# - rw,async: Explicitly locks read-write and asynchronous I/O mode, allowing the kernel
+#   page cache to buffer and flush sequential writes cleanly. Replaces 'defaults' to avoid
+#   conflicts with 'boot: false' in ansible.posix.mount.
 # - nofail: Prevents boot failure if encrypted devices are not yet unlocked.
-# - compress=zstd:1: Fast, low-latency compression chosen over zstd:3 to emit steady,
-#   rapid write streams that feed the SMR CMR cache without erratic latency spikes.
-# - noatime: Eliminates metadata write overhead on read operations.
+# - compress=zstd:1: Fast, low-latency compression profile delivering high I/O throughput
+#   with minimal CPU overhead on low-power nodes (optimized for media/RAW and backup streams).
+# - noatime: Eliminates metadata write overhead on read operations, preserving SSD flash endurance
+#   and preventing unnecessary CoW snapshot extent divergence.
 # - user_subvol_rm_allowed: Permits unprivileged subvolume deletion for snapshot rotation.
-# Note: 'defaults' is replaced by explicit 'rw,async' to avoid conflicts with 'boot: false'
-# in ansible.posix.mount (which emits warnings when 'defaults' is present).
-# Note: 'autodefrag' is intentionally avoided to prevent destructive SMR write amplification.
+# Note: 'autodefrag' is intentionally avoided to prevent breaking CoW extent sharing across
+# Btrfs snapshots (which would cause severe snapshot space inflation) and SSD wear.
 crypto_btrfs_default_mount_options: "rw,async,nofail,compress=zstd:1,noatime,user_subvol_rm_allowed"
+
+# Performance flags passed to cryptsetup luksOpen when unlocking LUKS2 devices.
+# Bypasses async dm-crypt workqueues (kcryptd) for inline AES-NI / ARMv8 CE hardware processing.
+crypto_perf_flags: "--perf-no_read_workqueue --perf-no_write_workqueue"
+
+# Declarative list of directory paths where Btrfs transparent compression should be disabled.
+# Sets the 'm' (no compression) attribute, ensuring uncompressible media files
+# (photos, RAW, videos) bypass CPU-intensive zstd compression tests.
+crypto_no_compression_paths: []
 
 
 # Declarative list of encrypted block devices or RAID pools to manage on the host.

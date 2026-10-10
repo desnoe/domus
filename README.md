@@ -8,11 +8,11 @@ Infrastructure as Code (IaC) repository for provisioning, hardening, and managin
 
 - **Host Provisioning**: Bootstrap minimal Debian systems with automated user management (`ansible_user`), SSH hardening, and sudo rights.
 - **Layered Storage Security**:
-  - **LUKS**: Block-level encryption with AES-256 (`luks_pass`) on each member device.
-  - **Btrfs**: Filesystem management directly on decrypted LUKS containers with native RAID1 mirroring for multi-device pools, declarative subvolume mount paths, transparent zstd compression, and automated fstab integration.
+  - **LUKS**: Block-level encryption with AES-256 (`luks_pass`) on each member device, featuring inline hardware AES acceleration (`crypto_perf_flags`) bypassing asynchronous workqueues.
+  - **Btrfs**: Filesystem management directly on decrypted LUKS containers with native RAID1 mirroring for multi-device pools, declarative subvolume mount paths, transparent zstd compression (with declarative per-directory uncompressed opt-outs via `crypto_no_compression_paths`), and automated fstab integration.
 - **Automated Backups**:
   - Daily read-only Btrfs snapshots (`btrfs-snapshot-<name>.timer` / `.service` at 05:00) bound to source and destination `.mount` units and sandboxed with read-only source protection.
-  - Multi-cloud synchronization via `rclone` (`rclone-sync-<slug>.timer` / `.service` starting at 04:00) using direct `/usr/bin/rclone sync` execution, kernel mount binding, and `ProtectSystem=strict` sandboxing.
+  - Multi-cloud synchronization via `rclone` (`rclone-sync-<slug>.timer` / `.service` starting at 04:00) using direct `/usr/bin/rclone sync` execution, kernel mount binding, `ProtectSystem=strict` sandboxing, and gentle background scheduling (`Nice=10`, `IOSchedulingClass=best-effort`, `IOSchedulingPriority=6`).
 - **File Sharing & macOS Integration**:
   - Samba SMB3 service on encrypted storage hosts exposing Btrfs subvolumes in read-only mode with native macOS Finder "Previous Versions" snapshot navigation (`vfs_shadow_copy2`).
   - Automated Mac backups via `rsync` over SSH into target directory `/home/olivier/data/sync/mac/`.
@@ -132,13 +132,23 @@ Permanently unmounts, closes, and wipes an encrypted storage pool (both single d
 uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-remove.yml
 ```
 
-### 9. Configure Backup Services (Snapshots & Rclone)
+### 9. Normalize Unicode Filenames (NFC/NFD)
+Converts filenames on encrypted storage pools to UTF-8 NFC normalization via `convmv` to ensure compatibility between macOS Finder, Samba, and Linux:
+```bash
+# Default path (/home/{{ ansible_user }}/backup/sync/googledrive/macbookpro)
+uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/storage-normalize-unicode.yml
+
+# Custom target path
+uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/storage-normalize-unicode.yml -e target_path="/home/olivier/backup/sync/googledrive/macbookpro"
+```
+
+### 10. Configure Backup Services (Snapshots & Rclone)
 Copies your local `~/.config/rclone/rclone.conf` (`0600`), deploys `/home/{{ ansible_user }}/bin/snapshot.sh`, and configures sandboxed `systemd.service` and `systemd.timer` units for automated Btrfs snapshotting and cloud sync:
 ```bash
 uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/backup.yml
 ```
 
-### 10. Check Storage and System Health (Read-Only)
+### 11. Check Storage and System Health (Read-Only)
 Inspects base system identity/uptime, locales/keyboard, time/NTP sync, SSH daemon/authorized keys, UFW firewall status, LUKS encryption status, header backup presence, SMART health, Btrfs usage/error stats, `btrfs-snapshot-*` / `rclone-sync-*` systemd timers, `journald` logs, `rclone` remote configuration status, and Samba file sharing status:
 ```bash
 # Full health report

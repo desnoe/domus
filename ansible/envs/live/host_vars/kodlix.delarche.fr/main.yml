@@ -37,4 +37,7 @@ samba_shares:
   - name: data
     path: "/home/{{ ansible_user }}/data/sync"
     snapdir: "/home/{{ ansible_user }}/data/snapshots"
-    comment: "Btrfs data with Previous Versions"
+    comment: "Btrfs data"
+  - name: data-snapshots
+    path: "/home/{{ ansible_user }}/data/snapshots"
+    comment: "Btrfs data snapshots"

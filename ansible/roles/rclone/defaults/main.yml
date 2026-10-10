@@ -1,2 +1,7 @@
 ---
 rclone_jobs: []
+
+# Default process niceness and I/O scheduling priority for rclone background sync units.
+# Protects interactive SSH sessions and Samba file sharing performance.
+rclone_service_nice: 10
+rclone_service_io_priority: 6

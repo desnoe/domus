@@ -2,18 +2,19 @@
 crypto_disks:
   - name: data
     devices:
-      - /dev/disk/by-id/ata-VBOX_HARDDISK_VB4bf9f137-2a754221
-      - /dev/disk/by-id/ata-VBOX_HARDDISK_VB47326378-f9bc769e
+      - /dev/disk/by-id/ata-debian-1_SSD_GQ84JJWKHCDM5B354NNT
+      - /dev/disk/by-id/ata-debian-2_SSD_08X5T79BNBFM36W6GT86
     subvolumes:
       - "/home/{{ ansible_user }}/data/sync"
       - "/home/{{ ansible_user }}/data/snapshots"
   - name: backup
     devices:
-      - /dev/disk/by-id/ata-VBOX_HARDDISK_VB3a4d115e-5d14d18f
-      - /dev/disk/by-id/ata-VBOX_HARDDISK_VBb957bdc8-b76337e3
+      - /dev/disk/by-id/ata-debian-3_SSD_5E6AYTKT29XMK1XHWJ78
+      - /dev/disk/by-id/ata-debian-4_SSD_NWWFF9EGT4W4F6PE4PFK
     subvolumes:
       - "/home/{{ ansible_user }}/backup/sync"
       - "/home/{{ ansible_user }}/backup/snapshots"
+
 
 snapshot_jobs:
   - name: data
@@ -58,8 +59,14 @@ samba_shares:
   - name: data
     path: "/home/{{ ansible_user }}/data/sync"
     snapdir: "/home/{{ ansible_user }}/data/snapshots"
-    comment: "Btrfs data with Previous Versions"
+    comment: "Btrfs data"
+  - name: data-snapshots
+    path: "/home/{{ ansible_user }}/data/snapshots"
+    comment: "Btrfs data snapshots"
   - name: backup
     path: "/home/{{ ansible_user }}/backup/sync"
     snapdir: "/home/{{ ansible_user }}/backup/snapshots"
-    comment: "Btrfs backup with Previous Versions"
+    comment: "Btrfs backup"
+  - name: backup-snapshots
+    path: "/home/{{ ansible_user }}/backup/snapshots"
+    comment: "Btrfs backup snapshots"

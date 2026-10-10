@@ -36,6 +36,12 @@
   changed_when: false
   failed_when: false
 
+- name: "Check physical device presence for pool members: {{ current_disk.name }}"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ current_disk.devices }}"
+  register: crypto_phys_dev_stats
+
 - name: "Check disk SMART health for pool members: {{ current_disk.name }}"
   become: true
   ansible.builtin.command:
@@ -58,8 +64,11 @@
 
       --- MEMBER DEVICES (LUKS & SMART) ---
       {% for res in crypto_luks_status_cmds.results %}
+      {% set dev_stat = crypto_phys_dev_stats.results[loop.index0].stat %}
+      {% set dev_target = 'Present (-> ' ~ dev_stat.lnk_target ~ ')' if dev_stat.islnk | default(false) else ('Present' if dev_stat.exists else 'MISSING!') %}
       {% set hdr_file = '/var/backups/luks/luks-header-' ~ current_disk.name ~ '-' ~ (loop.index0 | string) ~ '.img (Present)' %}
       [Member {{ loop.index0 }} - {{ current_disk.devices[loop.index0] }}]
+      Device Link: {{ dev_target }}
       Mapper: /dev/mapper/{{ current_disk.name }}-{{ loop.index0 }}
       Header Backup: {{ hdr_file if crypto_luks_backup_stats.results[loop.index0].stat.exists else 'MISSING!' }}
       {{ res.stdout | default('LUKS container is not open or not found.', true) }}
