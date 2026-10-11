@@ -65,6 +65,18 @@
         - ufw
         - status
 
+    - name: Report Grafana Alloy observability status
+      ansible.builtin.include_role:
+        name: alloy
+        tasks_from: status
+        apply:
+          tags:
+            - alloy
+            - status
+      tags:
+        - alloy
+        - status
+
 - name: Report storage and backup status
   hosts: crypto
   become: true

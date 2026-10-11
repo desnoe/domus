@@ -44,6 +44,11 @@
   - All contributions must pass `uv run pre-commit run --all-files` with a clean exit code (`0`).
   - Linters enforced at maximum strictness: `ansible-lint --strict` (`profile: production`), `yamllint --strict` (`level: error`), `shellcheck --severity=style`, `check-ansible-vault`, and `pre-commit-hooks` (`v5.0.0`).
 
+- **Grafana Cloud Management (`gcx`)**:
+  - The `gcx` CLI is installed and authenticated on the controller.
+  - **Using the `domus` context is mandatory for all `gcx` commands** (`gcx --context domus ...` or explicit `--context domus` flag). Never omit the context to prevent querying or modifying unintended stacks or organizations.
+  - Use `gcx` to inspect datasources, retrieve Prometheus/Mimir and Loki push endpoints, and verify end-to-end telemetry ingestion via `gcx metrics query --context domus '<PromQL>'` and `gcx logs query --context domus '<LogQL>'`.
+
 
 ---
 

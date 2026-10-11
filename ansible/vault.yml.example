@@ -7,3 +7,8 @@ luks_pass: "CHANGE_ME_LUKS_PASSPHRASE"
 
 # Samba password for user access to SMB shares
 samba_pass: "CHANGE_ME_SAMBA_PASSWORD"
+
+# Grafana Cloud Observability credentials (Phase 1)
+vault_grafana_cloud_metrics_username: "CHANGE_ME_METRICS_USER_ID"
+vault_grafana_cloud_logs_username: "CHANGE_ME_LOGS_USER_ID"
+vault_grafana_cloud_api_key: "CHANGE_ME_GRAFANA_CLOUD_API_KEY"

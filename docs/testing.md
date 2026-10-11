@@ -10,11 +10,12 @@ This document centralizes all static, functional, security, and chaos/corner-cas
 flowchart LR
     QA["1. Static Quality Gates (TC-QA-01..02)"] --> SYS["2. System, Locales, NTP & SSHD (TC-SYS-01..04)"]
     SYS --> FW["3. UFW Dual-Stack Firewall (TC-FW-01..03)"]
-    FW --> STO["4. LUKS & Btrfs RAID1 Storage (TC-STO-01..04)"]
-    STO --> BAK["5. Systemd Rclone & Snapshots (TC-BAK-01..04)"]
-    BAK --> SMB["6. Samba & Shadow Copies (TC-SMB-01..07)"]
-    SMB --> ADV["7. Advanced Corner Cases & Chaos (TC-ADV-01..06)"]
-    ADV --> RUN["8. Master Non-Regression Checklist"]
+    FW --> OBS["4. Unified Observability & Alloy (TC-OBS-01..02)"]
+    OBS --> STO["5. LUKS & Btrfs RAID1 Storage (TC-STO-01..04)"]
+    STO --> BAK["6. Systemd Rclone & Snapshots (TC-BAK-01..04)"]
+    BAK --> SMB["7. Samba & Shadow Copies (TC-SMB-01..07)"]
+    SMB --> ADV["8. Advanced Corner Cases & Chaos (TC-ADV-01..06)"]
+    ADV --> RUN["9. Master Non-Regression Checklist"]
 ```
 
 | Domain Prefix | Scope | Playbooks / Components Covered | Test Count |
@@ -22,6 +23,7 @@ flowchart LR
 | **`TC-QA`** | Static Quality Gates & Linting | `.pre-commit-config.yaml`, `.ansible-lint`, `.yamllint`, `shellcheck`, `vault.yml` | 2 |
 | **`TC-SYS`** | System Baseline, Locales, Time & SSH | `bootstrap.yml`, `system.yml`, `apt`, `base`, `locales`, `ntp`, `sshd`, `sudo`, `vim`, `htop` | 4 |
 | **`TC-FW`** | Dual-Stack Firewall (`ufw`) | `system.yml`, `ufw` role, `iptables` / `ip6tables` kernel chains | 3 |
+| **`TC-OBS`** | Unified Observability & Telemetry | `system.yml`, `status.yml`, `alloy` role, Grafana Alloy HTTP probe | 2 |
 | **`TC-STO`** | Encrypted Storage & Btrfs RAID1 | `storage-wipe-and-reset.yml`, `storage-unlock.yml`, `storage-replace.yml`, `crypto` role | 4 |
 | **`TC-BAK`** | Cloud Sync & Btrfs Snapshots (`systemd`) | `backup.yml`, `status.yml`, `rclone` role, `snapshot` role | 7 |
 | **`TC-SMB`** | Samba File Sharing & Shadow Copies | `system.yml`, `status.yml`, `samba` role, `vfs_shadow_copy2`, `smbclient` | 7 |
@@ -170,7 +172,41 @@ flowchart LR
 
 ---
 
-## 4. Encrypted Storage (`crypto`) & Btrfs RAID1 Lifecycle (`TC-STO`)
+## 4. Unified Observability & Telemetry (`TC-OBS`)
+
+### `TC-OBS-01` — Alloy Service Deployment, Sandboxing & HTTP Readiness Probe
+- **Objective**: Verify that Grafana Alloy daemon is properly installed, bound to systemd sandboxing limits (`Nice=15`, `MemoryMax=512M`, `ProtectSystem=strict`), running actively, and responding to HTTP readiness probes.
+- **Preconditions**: `system.yml` applied.
+- **Commands**:
+  ```bash
+  ssh olivier@debian.delarche.fr "
+  sudo systemctl is-active alloy | grep -q '^active$'
+  sudo systemctl show alloy.service -p Nice -p MemoryMax -p ProtectSystem
+  curl -fsS http://127.0.0.1:12345/-/ready
+  "
+  ```
+- **Expected Result**:
+  - `systemctl is-active alloy` returns `active`.
+  - `Nice=15`, `MemoryMax=536870912` (512M), `ProtectSystem=strict`.
+  - `curl` probe to `http://127.0.0.1:12345/-/ready` exits with `0` and body `ready`.
+
+---
+
+### `TC-OBS-02` — Alloy LAN Web Interface UFW Firewall Verification & Status Report
+- **Objective**: Confirm that the Alloy internal UI port (`12345/tcp`) is explicitly allowed through UFW for the LAN subnet (`alloy_allowed_subnet`), and verify that `status.yml --tags alloy` reports daemon health cleanly.
+- **Preconditions**: `system.yml` applied.
+- **Commands**:
+  ```bash
+  ssh olivier@debian.delarche.fr "sudo ufw status verbose | grep -E '12345/tcp.*ALLOW IN'"
+  ANSIBLE_HOME=/tmp/.ansible uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags alloy
+  ```
+- **Expected Result**:
+  - UFW rules contain `12345/tcp ALLOW IN <alloy_allowed_subnet>`.
+  - `status.yml` executes with exit code `0` and prints the `GRAFANA ALLOY STATUS REPORT` with `Active State: active` and `HTTP Readiness: 200`.
+
+---
+
+## 5. Encrypted Storage (`crypto`) & Btrfs RAID1 Lifecycle (`TC-STO`)
 
 ### `TC-STO-01` — Destructive Wipe & Multi-Pool RAID1 Initialization
 - **Objective**: Validate full LUKS formatting, header backup creation (`0400`), multi-device Btrfs RAID1 creation (`-d raid1 -m raid1`), and flattened subvolume mounting across all pools (`data` and `backup`).
@@ -281,7 +317,7 @@ flowchart LR
 
 ---
 
-## 5. Cloud Sync (`rclone`) & Btrfs Snapshots (`snapshot`) via `systemd` (`TC-BAK`)
+## 6. Cloud Sync (`rclone`) & Btrfs Snapshots (`snapshot`) via `systemd` (`TC-BAK`)
 
 ### `TC-BAK-01` — `backup.yml` Deployment, Official `rclone` Package & Idempotence
 - **Objective**: Verify that `backup.yml` installs the current upstream `rclone` `.deb` package, copies `~/.config/rclone/rclone.conf` (`0600`, `no_log: true`), enables all `systemd` timers, and achieves `changed=0` on the second run.
@@ -426,7 +462,7 @@ flowchart LR
 
 ---
 
-## 6. Samba File Sharing & Shadow Copies (`TC-SMB`)
+## 7. Samba File Sharing & Shadow Copies (`TC-SMB`)
 
 ### `TC-SMB-01` — Service Health & Port 445/TCP Listener
 - **Objective**: Verify that the `smbd` systemd service is active and listening exclusively on port `445/tcp` (NetBIOS port 139 disabled).
@@ -520,7 +556,7 @@ flowchart LR
 
 ---
 
-## 7. Advanced Corner-Case & Chaos Sequences (`TC-ADV`)
+## 8. Advanced Corner-Case & Chaos Sequences (`TC-ADV`)
 
 ### `TC-ADV-01` — Post-Reboot Locked/Unmounted Pool 0ms Refusal (`Requisite=` + `PartOf=`)
 - **Objective**: Simulate the daily `04:00` (`rclone`) and `05:00` (`snapshot`) systemd timers firing after an unattended reboot while LUKS/Btrfs is still locked/unmounted. Prove that `systemd` aborts both services in **0 ms** (`Dependency failed`) without hanging on `/dev/disk/by-label/data` or writing to the root `/` filesystem.
@@ -654,17 +690,18 @@ flowchart LR
 
 ---
 
-## 8. Master End-to-End Non-Regression Campaign Checklist
+## 9. Master End-to-End Non-Regression Campaign Checklist
 
 Use this ordered checklist to execute a complete validation campaign on `debian.delarche.fr`:
 
 - [ ] **Step 1 — Static Quality Gates**: Run `TC-QA-01` (`pre-commit run --all-files`) and `TC-QA-02` (`--syntax-check`).
 - [ ] **Step 2 — System Baseline & Hardening**: Run `TC-SYS-01` (`system.yml` twice, `changed=0` on 2nd run), `TC-SYS-02` (locales/keyboard), `TC-SYS-03` (NTP/leap seconds), and `TC-SYS-04` (multi-key SSH login).
 - [ ] **Step 3 — Dual-Stack Firewall (`ufw`)**: Run `TC-FW-01` (netfilter rules), `TC-FW-02` (live port 9999 probe), and `TC-FW-03` (`ufw disable` remediation).
-- [ ] **Step 4 — Storage Wipe, Unlock & Reboot Cycle**: Run `TC-STO-01` (`storage-wipe-and-reset.yml`), `TC-STO-02` (`storage-unlock.yml` idempotence), and `TC-STO-03` (full lock/unlock cycle).
-- [ ] **Step 5 — Cloud Sync & Btrfs Snapshots (`systemd`)**: Run `TC-BAK-01` (`backup.yml` twice), `TC-BAK-02` (`OneDrive:/Share/50ans` sync), `TC-BAK-03` (`btrfs-snapshot-data.service`), `TC-BAK-04` (`status.yml`), `TC-BAK-05` (multi-destination sync & mount unit check), `TC-BAK-06` (negative validation suite), and `TC-BAK-07` (orphan unit cleanup).
-- [ ] **Step 6 — Samba File Sharing & Shadow Copies**: Run `TC-SMB-01` (service health), `TC-SMB-02` (authenticated SMB3 listing), `TC-SMB-03` (shadow copies mapping), `TC-SMB-04` (read-only rejection), `TC-SMB-06` (`system.yml --tags samba` idempotence), and `TC-SMB-07` (SMB1 rejection).
-- [ ] **Step 7 — Advanced Corner Cases & Chaos**: Run `TC-ADV-01` (unmounted 0ms refusal), `TC-ADV-02` (`PartOf=` unmount kill-switch), `TC-ADV-03` (EROFS sandbox probe), `TC-ADV-04` (ISO-week snapshot pruning), `TC-ADV-05` (wiped disk auto-detected RAID1 rebuild + scrub), and `TC-ADV-06` (LUKS2 header corruption & restore).
+- [ ] **Step 4 — Unified Observability (`alloy`)**: Run `TC-OBS-01` (Alloy active state, cgroups sandboxing, and HTTP probe) and `TC-OBS-02` (LAN UFW rules & `status.yml --tags alloy`).
+- [ ] **Step 5 — Storage Wipe, Unlock & Reboot Cycle**: Run `TC-STO-01` (`storage-wipe-and-reset.yml`), `TC-STO-02` (`storage-unlock.yml` idempotence), and `TC-STO-03` (full lock/unlock cycle).
+- [ ] **Step 6 — Cloud Sync & Btrfs Snapshots (`systemd`)**: Run `TC-BAK-01` (`backup.yml` twice), `TC-BAK-02` (`OneDrive:/Share/50ans` sync), `TC-BAK-03` (`btrfs-snapshot-data.service`), `TC-BAK-04` (`status.yml`), `TC-BAK-05` (multi-destination sync & mount unit check), `TC-BAK-06` (negative validation suite), and `TC-BAK-07` (orphan unit cleanup).
+- [ ] **Step 7 — Samba File Sharing & Shadow Copies**: Run `TC-SMB-01` (service health), `TC-SMB-02` (authenticated SMB3 listing), `TC-SMB-03` (shadow copies mapping), `TC-SMB-04` (read-only rejection), `TC-SMB-06` (`system.yml --tags samba` idempotence), and `TC-SMB-07` (SMB1 rejection).
+- [ ] **Step 8 — Advanced Corner Cases & Chaos**: Run `TC-ADV-01` (unmounted 0ms refusal), `TC-ADV-02` (`PartOf=` unmount kill-switch), `TC-ADV-03` (EROFS sandbox probe), `TC-ADV-04` (ISO-week snapshot pruning), `TC-ADV-05` (wiped disk auto-detected RAID1 rebuild + scrub), and `TC-ADV-06` (LUKS2 header corruption & restore).
 
 > [!NOTE]
-> **Automated CI execution**: The full non-regression campaign (Steps 1–7) runs automatically on every commit across all branches via [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) on the self-hosted runner (`runner.delarche.fr`). To skip the destructive lab tests (e.g., for documentation-only changes), include `[skip-lab]` in the commit message. See [`docs/github-ci-runner-setup.md`](github-ci-runner-setup.md) for details.
+> **Automated CI execution**: The full non-regression campaign (Steps 1–8) runs automatically on every commit across all branches via [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) on the self-hosted runner (`runner.delarche.fr`). To skip the destructive lab tests (e.g., for documentation-only changes), include `[skip-lab]` in the commit message. See [`docs/github-ci-runner-setup.md`](github-ci-runner-setup.md) for details.
