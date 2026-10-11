@@ -1,6 +1,6 @@
 # 🧪 Test Book & Non-Regression Verification Guide
 
-This document centralizes all static, functional, security, and chaos/corner-case test procedures for the `homecode` repository. Every test case is formatted as an actionable Test Card with deterministic commands and pass criteria validated against the `lab` environment (`debian.delarche.fr`).
+This document centralizes all static, functional, security, and chaos/corner-case test procedures for the `domus` repository. Every test case is formatted as an actionable Test Card with deterministic commands and pass criteria validated against the `lab` environment (`debian.delarche.fr`).
 
 ---
 

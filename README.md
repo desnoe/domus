@@ -1,4 +1,4 @@
-# homecode
+# domus
 
 Infrastructure as Code (IaC) repository for provisioning, hardening, and managing home Debian servers, encrypted storage stacks, and automated cloud backups.
 

@@ -110,7 +110,7 @@ cd /opt/actions-runner
 
 # Register the runner with your repository
 ./config.sh \
-  --url https://github.com/desnoe/homecode \
+  --url https://github.com/desnoe/domus \
   --token <YOUR_REGISTRATION_TOKEN> \
   --name runner.delarche.fr \
   --labels self-hosted,linux,lab \
@@ -145,7 +145,7 @@ If you prefer to run the GitHub Actions runner inside a rootless Podman containe
      --name github-runner \
      --restart always \
      --network host \
-     -e REPO_URL="https://github.com/desnoe/homecode" \
+     -e REPO_URL="https://github.com/desnoe/domus" \
      -e RUNNER_NAME="podman-runner" \
      -e RUNNER_TOKEN="<YOUR_REGISTRATION_TOKEN>" \
      -e LABELS="self-hosted,linux,lab" \

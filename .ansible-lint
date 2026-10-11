@@ -1,5 +1,5 @@
 ---
-# Configuration for ansible-lint on homecode
+# Configuration for ansible-lint on domus
 profile: production
 strict: true
 
