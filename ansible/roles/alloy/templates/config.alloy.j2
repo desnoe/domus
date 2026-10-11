@@ -12,27 +12,32 @@ prometheus.exporter.unix "node" {
     "loadavg",
     "meminfo",
     "netdev",
+    "netstat",
+    "sockstat",
     "stat",
     "thermal_zone",
     "time",
+    "timex",
     "uname",
+    "vmstat",
   ]
 
   filesystem {
-    fs_types_exclude = "^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$"
+    fs_types_exclude     = "^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tmpfs|tracefs)$"
     mount_points_exclude = "^/(dev|proc|run/credentials/.+|sys|var/lib/docker/.+)($|/)"
+    mount_timeout        = "5s"
+  }
+
+  netdev {
+    device_exclude = "^(veth.*|cali.*|[a-f0-9]{15})$"
   }
 }
 
 {% if alloy_grafana_cloud_metrics_url | length > 0 and alloy_grafana_cloud_api_key | length > 0 %}
 // 2. Metrics Scrape & Remote Write Pipeline
-prometheus.scrape "node" {
-  targets         = prometheus.exporter.unix.node.targets
-  forward_to      = [prometheus.relabel.metrics_filter.receiver]
-  scrape_interval = "60s"
-}
+discovery.relabel "node" {
+  targets = prometheus.exporter.unix.node.targets
 
-prometheus.relabel "metrics_filter" {
   rule {
     target_label = "instance"
     replacement  = "{{ inventory_hostname }}"
@@ -41,17 +46,24 @@ prometheus.relabel "metrics_filter" {
     target_label = "host"
     replacement  = "{{ inventory_hostname }}"
   }
-
-  // Filter out redundant high-cardinality metrics
   rule {
-    action        = "drop"
-    regex         = "^node_cpu_guest_seconds_total$"
-    source_labels = ["__name__"]
+    target_label = "job"
+    replacement  = "integrations/node_exporter"
   }
+}
+
+prometheus.scrape "node" {
+  targets         = discovery.relabel.node.output
+  forward_to      = [prometheus.relabel.metrics_filter.receiver]
+  scrape_interval = "60s"
+}
+
+prometheus.relabel "metrics_filter" {
+  // Dashboard-aligned keep filter + domus Btrfs RAID1 & thermal metrics
   rule {
-    action        = "drop"
-    regex         = "^node_scrape_collector_.+$"
     source_labels = ["__name__"]
+    regex         = "up|node_boot_time_seconds|node_btrfs_.*|node_context_switches_total|node_cpu_seconds_total|node_disk_io_time_seconds_total|node_disk_io_time_weighted_seconds_total|node_disk_read_bytes_total|node_disk_read_time_seconds_total|node_disk_reads_completed_total|node_disk_write_time_seconds_total|node_disk_writes_completed_total|node_disk_written_bytes_total|node_filefd_allocated|node_filefd_maximum|node_filesystem_avail_bytes|node_filesystem_device_error|node_filesystem_files|node_filesystem_files_free|node_filesystem_readonly|node_filesystem_size_bytes|node_intr_total|node_load1|node_load15|node_load5|node_memory_.*|node_netstat_.*|node_network_.*|node_sockstat_.*|node_thermal_zone_temp|node_time_zone_offset_seconds|node_timex_.*|node_uname_info|node_vmstat_oom_kill|node_vmstat_pg.*|node_vmstat_pswp.*"
+    action        = "keep"
   }
 
   forward_to = [prometheus.remote_write.grafana_cloud.receiver]
@@ -78,8 +90,16 @@ loki.relabel "journal_filter" {
     target_label  = "unit"
   }
   rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "level"
+  }
+  rule {
     source_labels = ["__journal_priority"]
     target_label  = "priority"
+  }
+  rule {
+    source_labels = ["__journal__boot_id"]
+    target_label  = "boot_id"
   }
   rule {
     source_labels = ["__journal_syslog_identifier"]
@@ -94,8 +114,9 @@ loki.relabel "journal_filter" {
 loki.source.journal "systemd" {
   max_age       = "12h"
   labels        = {
-    host = "{{ inventory_hostname }}",
-    job  = "systemd-journal",
+    instance = "{{ inventory_hostname }}",
+    host     = "{{ inventory_hostname }}",
+    job      = "integrations/node_exporter",
   }
   relabel_rules = loki.relabel.journal_filter.rules
   forward_to    = [loki.write.grafana_cloud.receiver]
