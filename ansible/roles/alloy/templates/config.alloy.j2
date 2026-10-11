@@ -1,0 +1,113 @@
+// Grafana Alloy Configuration
+// Managed by Ansible - do not edit manually
+
+// 1. Host & Storage Metrics (prometheus.exporter.unix)
+prometheus.exporter.unix "node" {
+  set_collectors = [
+    "btrfs",
+    "cpu",
+    "diskstats",
+    "filefd",
+    "filesystem",
+    "loadavg",
+    "meminfo",
+    "netdev",
+    "stat",
+    "thermal_zone",
+    "time",
+    "uname",
+  ]
+
+  filesystem {
+    fs_types_exclude = "^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$"
+    mount_points_exclude = "^/(dev|proc|run/credentials/.+|sys|var/lib/docker/.+)($|/)"
+  }
+}
+
+{% if alloy_grafana_cloud_metrics_url | length > 0 and alloy_grafana_cloud_api_key | length > 0 %}
+// 2. Metrics Scrape & Remote Write Pipeline
+prometheus.scrape "node" {
+  targets         = prometheus.exporter.unix.node.targets
+  forward_to      = [prometheus.relabel.metrics_filter.receiver]
+  scrape_interval = "60s"
+}
+
+prometheus.relabel "metrics_filter" {
+  rule {
+    target_label = "instance"
+    replacement  = "{{ inventory_hostname }}"
+  }
+  rule {
+    target_label = "host"
+    replacement  = "{{ inventory_hostname }}"
+  }
+
+  // Filter out redundant high-cardinality metrics
+  rule {
+    action        = "drop"
+    regex         = "^node_cpu_guest_seconds_total$"
+    source_labels = ["__name__"]
+  }
+  rule {
+    action        = "drop"
+    regex         = "^node_scrape_collector_.+$"
+    source_labels = ["__name__"]
+  }
+
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+}
+
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    url = "{{ alloy_grafana_cloud_metrics_url }}"
+    basic_auth {
+      username = "{{ alloy_grafana_cloud_metrics_username }}"
+      password = "{{ alloy_grafana_cloud_api_key }}"
+    }
+  }
+}
+{% endif %}
+
+{% if alloy_grafana_cloud_logs_url | length > 0 and alloy_grafana_cloud_api_key | length > 0 %}
+// 3. Systemd Journald Log Pipeline
+loki.relabel "journal_filter" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+  rule {
+    source_labels = ["__journal_priority"]
+    target_label  = "priority"
+  }
+  rule {
+    source_labels = ["__journal_syslog_identifier"]
+    target_label  = "syslog_identifier"
+  }
+  rule {
+    source_labels = ["__journal__transport"]
+    target_label  = "transport"
+  }
+}
+
+loki.source.journal "systemd" {
+  max_age       = "12h"
+  labels        = {
+    host = "{{ inventory_hostname }}",
+    job  = "systemd-journal",
+  }
+  relabel_rules = loki.relabel.journal_filter.rules
+  forward_to    = [loki.write.grafana_cloud.receiver]
+}
+
+loki.write "grafana_cloud" {
+  endpoint {
+    url = "{{ alloy_grafana_cloud_logs_url }}"
+    basic_auth {
+      username = "{{ alloy_grafana_cloud_logs_username }}"
+      password = "{{ alloy_grafana_cloud_api_key }}"
+    }
+  }
+}
+{% endif %}

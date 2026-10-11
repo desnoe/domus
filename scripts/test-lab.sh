@@ -83,6 +83,9 @@ step_system_and_ufw() {
     assert_playbook_idempotent ansible/system.yml
 
     run_remote << 'EOF'
+sudo systemctl is-active alloy | grep -q "^active$"
+curl -fsS http://127.0.0.1:12345/-/ready > /dev/null
+sudo ufw status verbose | grep -q "12345/tcp"
 sudo ufw disable
 EOF
 

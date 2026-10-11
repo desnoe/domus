@@ -1,0 +1,118 @@
+---
+- name: Ensure APT keyrings directory exists
+  when: alloy_enabled | bool
+  become: true
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download Grafana APT GPG signing key
+  when: alloy_enabled | bool
+  become: true
+  ansible.builtin.get_url:
+    url: "https://apt.grafana.com/gpg.key"
+    dest: /etc/apt/keyrings/grafana.asc
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+
+- name: Add Grafana APT package repository
+  when: alloy_enabled | bool
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/grafana.list
+    content: "deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main\n"
+    owner: root
+    group: root
+    mode: "0644"
+  register: alloy_repo_file
+
+- name: Update APT cache for Grafana repository
+  when:
+    - alloy_enabled | bool
+    - alloy_repo_file is changed
+  become: true
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Install Grafana Alloy package
+  when: alloy_enabled | bool
+  become: true
+  ansible.builtin.apt:
+    name: alloy
+    state: present
+
+- name: Add alloy user to systemd-journal group
+  when: alloy_enabled | bool
+  become: true
+  ansible.builtin.user:
+    name: alloy
+    groups: systemd-journal
+    append: true
+
+- name: Ensure Alloy systemd override directory exists
+  when: alloy_enabled | bool
+  become: true
+  ansible.builtin.file:
+    path: /etc/systemd/system/alloy.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy Alloy environment flags in /etc/default/alloy
+  when: alloy_enabled | bool
+  become: true
+  ansible.builtin.template:
+    src: alloy.default.j2
+    dest: /etc/default/alloy
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart alloy
+
+- name: Deploy Alloy systemd sandboxing override
+  when: alloy_enabled | bool
+  become: true
+  ansible.builtin.template:
+    src: alloy.override.conf.j2
+    dest: /etc/systemd/system/alloy.service.d/override.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd daemon
+    - Restart alloy
+
+- name: Deploy Alloy River pipeline configuration
+  when: alloy_enabled | bool
+  become: true
+  ansible.builtin.template:
+    src: config.alloy.j2
+    dest: /etc/alloy/config.alloy
+    owner: root
+    group: alloy
+    mode: "0640"
+  notify: Restart alloy
+
+- name: Allow Grafana Alloy UI through firewall (LAN only)
+  when: alloy_enabled | bool
+  become: true
+  community.general.ufw:
+    rule: allow
+    port: "12345"
+    proto: tcp
+    from_ip: "{{ alloy_allowed_subnet }}"
+    comment: "Allow Grafana Alloy UI (LAN)"
+
+- name: Ensure Grafana Alloy service is running and enabled
+  when: alloy_enabled | bool
+  become: true
+  ansible.builtin.service:
+    name: alloy
+    state: started
+    enabled: true

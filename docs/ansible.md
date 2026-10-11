@@ -188,12 +188,32 @@ Configures hardware layout and backup targets:
   - Stale or orphaned units (`/etc/systemd/system/rclone-sync-*.{service,timer}`) not present in `rclone_jobs` are stopped, disabled, and removed automatically during playbook runs.
 
 
-### 3. Encrypted Secrets (`ansible/envs/<env>/host_vars/<hostname>/vault.yml`)
+### 3. Unified Observability & Telemetry (`alloy`)
+The `alloy` role provisions Grafana Alloy on all infrastructure nodes to collect system, Btrfs storage, and journald telemetry, streaming metrics and structured logs to Grafana Cloud Free Tier:
+- **Metrics Pipeline (`prometheus.exporter.unix`)**:
+  - Automatically monitors CPU, RAM, load, system temperatures, network interfaces, block device/LUKS mapper throughput (`diskstats`), and Btrfs filesystem usage across all subvolumes.
+  - Applies relabeling rules dropping high-cardinality series (per-CPU frequency, cgroup memory churn) to remain well below 1,500 series across all domestic nodes.
+  - Ships metrics via `prometheus.remote_write` to Grafana Cloud Mimir (`alloy_grafana_cloud_metrics_url`).
+- **Log Pipeline (`loki.source.journal`)**:
+  - Scrapes local `systemd-journald` log streams natively.
+  - Applies strict whitelist relabeling to only ship logs from targeted units (`sshd.service`, `smbd.service`, `rclone-sync-*.service`, `btrfs-snapshot-*.service`, `kernel`, `ufw`) or system-wide errors with priority $\le$ 3 (`emerg`, `alert`, `crit`, `err`).
+  - Ships structured logs via `loki.write` to Grafana Cloud Loki (`alloy_grafana_cloud_logs_url`).
+- **Sandboxing & Network Protection**:
+  - Managed via native `systemd` service (`alloy.service`) hardened with `Nice=15`, `IOSchedulingClass=best-effort`, `IOSchedulingPriority=7`, `MemoryHigh=256M`, `MemoryMax=512M`, `ProtectSystem=strict`, and `ProtectHome=read-only`.
+  - Local debugging web UI (`12345/tcp`) is accessible from the LAN (`alloy_allowed_subnet: "192.168.1.0/24"`) via UFW.
+  - Operates safely in standalone/local mode when Grafana Cloud credentials are omitted (e.g. CI or local test labs).
+
+
+### 4. Encrypted Secrets (`ansible/envs/<env>/host_vars/<hostname>/vault.yml`)
 > [!IMPORTANT]
 > All sensitive credentials and secrets are encrypted with `ansible-vault` (AES-256) using password file `~/.ansible_vault_pass`.
 
 Each host's `vault.yml` defines:
 - **`luks_pass`**: The disk encryption passphrase used by `cryptsetup` to format or open the LUKS containers.
+- **`samba_pass`**: Samba user password for SMB access.
+- **`vault_grafana_cloud_metrics_username`**: Grafana Cloud Mimir/Prometheus user ID (`3655705`).
+- **`vault_grafana_cloud_logs_username`**: Grafana Cloud Loki user ID (`1823517`).
+- **`vault_grafana_cloud_api_key`**: Grafana Cloud Access Policy token with `metrics:write` and `logs:write` scopes.
 
 #### Managing Vault Files:
 A template is maintained in [`ansible/vault.yml.example`](../ansible/vault.yml.example).
@@ -229,9 +249,9 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   *(The `-K` flag interactively prompts for the `become` password in your terminal; passwords are never saved to disk or git).*
 
 ### 2. `ansible/system.yml`
-- **Purpose**: System-wide baseline configuration, package management, security hardening, service management, GitHub Actions self-hosted runner provisioning/upgrades, and Samba file sharing with Previous Versions.
+- **Purpose**: System-wide baseline configuration, package management, security hardening, service management, unified telemetry via Grafana Alloy, GitHub Actions self-hosted runner provisioning/upgrades, and Samba file sharing with Previous Versions.
 - **Target hosts**: Play 1 on `hosts: all`; Play 2 on `hosts: runner`; Play 3 on `hosts: crypto`.
-- **Roles executed**: `apt`, `base`, `htop`, `locales`, `ntp`, `sshd`, `sudo`, `ufw`, `vim` (on `all`), `runner` (on `runner`), and `samba` (on `crypto`, tagged with `samba`).
+- **Roles executed**: `apt`, `base`, `htop`, `locales`, `ntp`, `sshd`, `sudo`, `ufw`, `vim`, `alloy` (on `all`), `runner` (on `runner`), and `samba` (on `crypto`, tagged with `samba`).
 - **Usage**:
   ```bash
   # Full system run across all hosts
@@ -239,6 +259,9 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 
   # Target Samba service configuration only
   uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml --tags samba
+
+  # Target Alloy telemetry agent only
+  uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml --tags alloy
   ```
 
 ### 3. `ansible/storage-unlock.yml`
@@ -340,6 +363,7 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags ntp
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags sshd
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags ufw
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags alloy
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags crypto
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags snapshot
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags rclone
@@ -361,6 +385,7 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 
 | Role | Description | Key Managed Files / Services |
 | :--- | :--- | :--- |
+| **`alloy`** | Provisions Grafana Alloy daemon for unified host and Btrfs storage telemetry with Prometheus node exporter, Loki journald log forwarding, systemd sandboxing (`ProtectSystem=strict`, `MemoryMax=512M`, `Nice=15`), UFW LAN web interface rules (`12345/tcp`), and Grafana Cloud remote write. | `/etc/alloy/config.alloy`, `/etc/default/alloy`, `/etc/systemd/system/alloy.service.d/override.conf`, `alloy` service |
 | **`apt`** | Ensures `sudo` and package tools are installed; upgrades system package cache; configures automatic security updates (`unattended-upgrades`). | `apt` cache, `/etc/apt/apt.conf.d/20auto-upgrades` |
 | **`base`** | Installs common utilities (`bash-completion`, `curl`, `git`, `man-db`, `rsync`, `tree`, `unzip`, `wget`), configures the live system hostname via `ansible.builtin.hostname`, and installs customized `.bashrc`. | `/etc/hostname`, `~/.bashrc`, `/root/.bashrc` |
 | **`crypto`** | Manages the full encrypted storage stack across 0, 1, or N volumes (`crypto_disks`) with single or multi-device Btrfs native RAID1: per-device LUKS format/open via memory/stdin with inline AES hardware acceleration (`crypto_perf_flags`), automated LUKS header backups (`/var/backups/luks/`), kernel device scanning (`btrfs device scan`), direct Btrfs formatting with semantic labels and automatic RAID1 mirroring, declarative absolute subvolume mounts with flattened internal subvolume names and zstd compression, declarative per-directory non-compression attributes (`crypto_no_compression_paths`), label-based fstab integration (`LABEL=<name>`), and monthly Btrfs scrub cron. | `/dev/mapper/<name>-<idx>`, `/var/backups/luks/`, `/etc/fstab` |

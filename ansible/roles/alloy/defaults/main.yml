@@ -1,0 +1,26 @@
+---
+# Enablement flag for Grafana Alloy daemon
+alloy_enabled: true
+
+# Listening host and port for the internal Alloy web UI and debugging API
+alloy_listen_addr: "0.0.0.0:12345"
+
+# Network subnet allowed to access the Alloy web UI through UFW
+alloy_allowed_subnet: "192.168.1.0/24"
+
+# Grafana Cloud remote-write push endpoints
+alloy_grafana_cloud_metrics_url: "https://prometheus-prod-68-prod-eu-west-6.grafana.net/api/prom/push"
+alloy_grafana_cloud_logs_url: "https://logs-prod-043.grafana.net/loki/api/v1/push"
+
+# Default credentials schema for Grafana Cloud authentication
+# Real API keys are stored in encrypted host_vars/<host>/vault.yml
+alloy_grafana_cloud_metrics_username: "{{ vault_grafana_cloud_metrics_username | default('3655705') }}"
+alloy_grafana_cloud_logs_username: "{{ vault_grafana_cloud_logs_username | default('1823517') }}"
+alloy_grafana_cloud_api_key: "{{ vault_grafana_cloud_api_key | default('') }}"
+
+# Systemd process sandboxing and cgroup resource boundaries
+alloy_service_nice: 15
+alloy_service_memory_high: "256M"
+alloy_service_memory_max: "512M"
+alloy_service_io_class: "best-effort"
+alloy_service_io_priority: 7

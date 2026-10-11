@@ -12,6 +12,9 @@
     - sudo
     - ufw
     - vim
+    - role: alloy
+      tags:
+        - alloy
 
 - name: Configure GitHub Actions self-hosted runner
   hosts: runner

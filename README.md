@@ -16,7 +16,11 @@ Infrastructure as Code (IaC) repository for provisioning, hardening, and managin
 - **File Sharing & macOS Integration**:
   - Samba SMB3 service on encrypted storage hosts exposing Btrfs subvolumes in read-only mode with native macOS Finder "Previous Versions" snapshot navigation (`vfs_shadow_copy2`).
   - Automated Mac backups via `rsync` over SSH into target directory `/home/olivier/data/sync/mac/`.
-  - UFW firewall packet filtering restricting SMB (port 445/tcp) strictly to the local LAN subnet (`192.168.1.0/24`).
+- **Unified Observability & Health Telemetry**:
+  - Grafana Alloy collector daemon deployed across all nodes via native systemd sandboxing (`ProtectSystem=strict`, `MemoryMax=512M`, `Nice=15`).
+  - Streams host metrics (CPU, RAM, temperatures), Btrfs filesystem and LUKS mapper I/O statistics (`prometheus.exporter.unix`) to Grafana Cloud Mimir.
+  - Ships structured, whitelist-filtered systemd journal logs (`loki.source.journal`) to Grafana Cloud Loki.
+  - LAN-accessible internal web UI (`12345/tcp`) protected by UFW firewall rules.
 - **System Hardening**: Baseline configuration covering `ufw` firewall (dual-stack IPv4/IPv6), SSH keys, locales, NTP, and administration tools.
 
 ---
@@ -57,12 +61,13 @@ The repository uses a clear variable precedence structure:
 | :--- | :--- | :--- | :--- |
 | **Global Defaults** | `ansible/envs/<env>/group_vars/all/main.yml` | Common across all hosts | `ansible_user` |
 | **Host Variables** | `ansible/envs/<env>/host_vars/<host>/main.yml` | Device layout & backup targets | `crypto_disks`, `snapshot_jobs`, `rclone_jobs`, `samba_shares` |
-| **Encrypted Secrets** | `ansible/envs/<env>/host_vars/<host>/vault.yml` | Storage passphrases & credentials | `luks_pass`, `samba_pass` |
+| **Encrypted Secrets** | `ansible/envs/<env>/host_vars/<host>/vault.yml` | Storage passphrases & credentials | `luks_pass`, `samba_pass`, `vault_grafana_cloud_api_key` |
 
 
 ### User Authentication & Storage Passphrases
 - **Storage Passphrase (`luks_pass`)**: The decryption passphrase for LUKS block devices is encrypted in each host's **`ansible/envs/<env>/host_vars/<host>/vault.yml`** and consumed by the **`crypto`** role. An unencrypted reference template is provided in [`ansible/vault.yml.example`](ansible/vault.yml.example).
 - **Samba User Credentials (`samba_pass`)**: Password for accessing Samba network shares over SMB3 from macOS Finder, encrypted in **`vault.yml`** and provisioned via `smbpasswd`.
+- **Grafana Cloud Credentials (`vault_grafana_cloud_api_key`)**: Access policy token for streaming metrics and logs to Grafana Cloud Mimir and Loki endpoints.
 - **User Login & Sudo**: Human user passwords are set during the initial Debian OS installation and are **never stored or managed in version control**. Ansible manages authorized SSH keys (`sshd` role) and passwordless sudo privileges via `/etc/sudoers.d/99-ansible-wheel` (`sudo` role).
 
 To view or edit secrets:
@@ -94,6 +99,9 @@ uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml
 
 # Scoped run targeting Samba only
 uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml --tags samba
+
+# Scoped run targeting Alloy telemetry only
+uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml --tags alloy
 ```
 
 ### 3. Unlock Storage After Server Reboot

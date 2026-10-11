@@ -1,0 +1,32 @@
+---
+- name: Query Grafana Alloy systemd service state  # noqa: command-instead-of-module
+  become: true
+  ansible.builtin.command:
+    cmd: "systemctl is-active alloy"
+  register: alloy_status_service_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Query Grafana Alloy local HTTP readiness probe  # noqa: command-instead-of-module
+  become: true
+  ansible.builtin.command:
+    cmd: "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:12345/-/ready"
+  register: alloy_status_health_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Display Grafana Alloy Status Summary
+  ansible.builtin.debug:
+    msg: |-
+      =======================================================
+      GRAFANA ALLOY STATUS REPORT: {{ inventory_hostname }}
+      =======================================================
+      --- DAEMON STATE ---
+      Active State:   {{ alloy_status_service_cmd.stdout | default('inactive', true) }}
+      HTTP Readiness: {{ alloy_status_health_cmd.stdout | default('unreachable', true) }} (port 12345)
+
+      --- TELEMETRY EXPORT TARGETS ---
+      Metrics Remote Write: {{ alloy_grafana_cloud_metrics_url | default('disabled (local only)', true) }}
+      Logs Remote Write:    {{ alloy_grafana_cloud_logs_url | default('disabled (local only)', true) }}
+      Vault API Key Config: {{ 'Configured' if (alloy_grafana_cloud_api_key | default('', true) | length > 0) else 'Not set (local only)' }}
+      =======================================================
