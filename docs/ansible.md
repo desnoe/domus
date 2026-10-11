@@ -1,6 +1,6 @@
 # Ansible Playbooks, Roles & Architecture Guide
 
-This document describes the structure, variable hierarchy, playbooks, and roles used to manage servers and storage in the `homecode` repository.
+This document describes the structure, variable hierarchy, playbooks, and roles used to manage servers and storage in the `domus` repository.
 
 ---
 

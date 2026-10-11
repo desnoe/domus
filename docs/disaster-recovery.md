@@ -1,6 +1,6 @@
 # 🚑 Disaster Recovery & Storage Operations Guide
 
-This guide provides step-by-step procedures for emergency recovery, data restoration, LUKS header restoration, and hardware replacement for systems managed by the `homecode` infrastructure.
+This guide provides step-by-step procedures for emergency recovery, data restoration, LUKS header restoration, and hardware replacement for systems managed by the `domus` infrastructure.
 
 ---
 

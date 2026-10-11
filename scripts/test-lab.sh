@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Lab non-regression integration test runner for homecode (targets debian.delarche.fr).
+# Lab non-regression integration test runner for domus (targets debian.delarche.fr).
 # Executed by GitHub Actions Job 2 (integration-tests-local) on runner.delarche.fr
 # or manually from the controller via: ./scripts/test-lab.sh <subcommand|all>
 #
 # Security note: Secrets (~/.ansible_vault_pass and ~/.config/rclone/rclone.conf)
 # persist on the self-hosted runner by design. The runner (runner.delarche.fr) is
-# an on-prem machine owned and operated by the repository owner, and the repository
-# is private. The check-prereqs step only writes these files if they are missing
+# an on-prem machine owned and operated by the repository owner.
+# For public repository security, the CI workflow restricts execution on this
+# runner to trusted repository branches and requires manual approval via the
+# 'lab' environment, blocking automatic execution from fork pull requests.
+# The check-prereqs step only writes these files if they are missing
 # (initial provisioning via GitHub Secrets); once provisioned, files are reused
 # across CI runs without re-creation.
 

@@ -1,5 +1,5 @@
 ---
-# Collections required for executing homecode playbooks
+# Collections required for executing domus playbooks
 collections:
   - name: ansible.posix
     version: "==1.5.4"

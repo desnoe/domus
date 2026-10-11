@@ -1,5 +1,5 @@
 [project]
-name = "homecode"
+name = "domus"
 version = "0.1.0"
 description = "Home servers and services management with Ansible"
 readme = "README.md"
