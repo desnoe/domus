@@ -1,0 +1,24 @@
+# Managed by Ansible - do not edit manually
+[Unit]
+Description=Prometheus Smartctl Exporter
+Documentation=https://github.com/prometheus-community/smartctl_exporter
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart={{ smartctl_exporter_bin_path }} --web.listen-address={{ smartctl_exporter_listen_address }}
+Restart=always
+RestartSec=5s
+Nice={{ smartctl_exporter_service_nice }}
+MemoryMax={{ smartctl_exporter_service_memory_max }}
+
+# Security & sandboxing
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

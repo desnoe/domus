@@ -133,6 +133,9 @@ Configures hardware layout and backup targets:
     - "/home/{{ ansible_user }}/backup/sync/googledrive/macbookpro"
   ```
 - `crypto_perf_flags`: Performance flags passed to `cryptsetup luksOpen` when unlocking LUKS2 devices (defaults to `"--perf-no_read_workqueue --perf-no_write_workqueue"` in `crypto` role defaults). Bypasses asynchronous `[kcryptd]` helper workqueues to execute hardware AES-NI / ARMv8 CE encryption inline on the submitting CPU core, minimizing context switches and latency.
+- `crypto_scrub_enabled`: Enables automated periodic Btrfs background checksum verification (`btrfs scrub start -B -d <subvol>`) managed via `btrfs-scrub-<pool>.timer` and `.service` (defaults to `true`).
+- `crypto_scrub_oncalendar`: Systemd calendar schedule for periodic scrub (defaults to `"Sun *-*-1..7 02:00:00"`, running on the 1st Sunday of each month at 02:00).
+- `crypto_scrub_io_class` & `crypto_scrub_nice`: Process and I/O scheduling priorities ensuring zero disruption to interactive operations (defaults to `idle` and `19`).
 - `snapshot_jobs`: Declarative list of Btrfs snapshot jobs scheduled via `systemd.timer` (`btrfs-snapshot-<name>.timer` / `.service`):
   ```yaml
   snapshot_jobs:
@@ -202,9 +205,25 @@ The `alloy` role provisions Grafana Alloy on all infrastructure nodes to collect
   - Managed via native `systemd` service (`alloy.service`) hardened with `Nice=15`, `IOSchedulingClass=best-effort`, `IOSchedulingPriority=7`, `MemoryHigh=256M`, `MemoryMax=512M`, `ProtectSystem=strict`, and `ProtectHome=read-only`.
   - Local debugging web UI (`12345/tcp`) is accessible from the LAN (`alloy_allowed_subnet: "192.168.1.0/24"`) via UFW.
   - Operates safely in standalone/local mode when Grafana Cloud credentials are omitted (e.g. CI or local test labs).
+  - Scrapes local `smartctl_exporter` on loopback (`alloy_smartctl_address: "127.0.0.1:9633"`) every `alloy_smartctl_scrape_interval: "120s"`, forwarding `smartctl_.*` metrics with job label `integrations/smartctl`.
 
 
-### 4. Encrypted Secrets (`ansible/envs/<env>/host_vars/<hostname>/vault.yml`)
+### 4. S.M.A.R.T. Disk Health Monitoring (`smartctl`)
+The `smartctl` role provisions hardware disk degradation detection across all nodes (`hosts: all`):
+- **Exporter Binary & Tooling**:
+  - Installs `smartmontools` and downloads the official Prometheus Community `smartctl_exporter` (`v0.15.0`) to `/usr/local/bin/smartctl_exporter`.
+  - Bound exclusively to loopback (`smartctl_exporter_listen_address: "127.0.0.1:9633"`), avoiding any external network attack surface.
+- **Systemd Sandboxing**:
+  - Managed via `smartctl_exporter.service` with `User=root`, `Nice=10`, `MemoryMax=128M`, `ProtectSystem=strict`, `ProtectHome=true`, `PrivateTmp=true`, and `NoNewPrivileges=true`.
+- **Role Variables (`defaults/main.yml`)**:
+  - `smartctl_exporter_enabled`: Global enablement toggle (default: `true`).
+  - `smartctl_exporter_version`: Pinned release version (default: `"0.15.0"`).
+  - `smartctl_exporter_listen_address`: Loopback listen address (default: `"127.0.0.1:9633"`).
+  - `smartctl_exporter_service_nice`: Process nice priority (default: `10`).
+  - `smartctl_exporter_service_memory_max`: Hard memory cgroup limit (default: `"128M"`).
+
+
+### 5. Encrypted Secrets (`ansible/envs/<env>/host_vars/<hostname>/vault.yml`)
 > [!IMPORTANT]
 > All sensitive credentials and secrets are encrypted with `ansible-vault` (AES-256) using password file `~/.ansible_vault_pass`.
 
@@ -251,7 +270,7 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 ### 2. `ansible/system.yml`
 - **Purpose**: System-wide baseline configuration, package management, security hardening, service management, unified telemetry via Grafana Alloy, GitHub Actions self-hosted runner provisioning/upgrades, and Samba file sharing with Previous Versions.
 - **Target hosts**: Play 1 on `hosts: all`; Play 2 on `hosts: runner`; Play 3 on `hosts: crypto`.
-- **Roles executed**: `apt`, `base`, `htop`, `locales`, `ntp`, `sshd`, `sudo`, `ufw`, `vim`, `alloy` (on `all`), `runner` (on `runner`), and `samba` (on `crypto`, tagged with `samba`).
+- **Roles executed**: `apt`, `base`, `htop`, `locales`, `ntp`, `sshd`, `sudo`, `ufw`, `vim`, `alloy`, `smartctl` (on `all`), `runner` (on `runner`), and `samba` (on `crypto`, tagged with `samba`).
 - **Usage**:
   ```bash
   # Full system run across all hosts
@@ -262,6 +281,9 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 
   # Target Alloy telemetry agent only
   uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml --tags alloy
+
+  # Target S.M.A.R.T. monitoring daemon only
+  uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml --tags smartctl
   ```
 
 ### 3. `ansible/storage-unlock.yml`
@@ -350,8 +372,8 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   ```
 
 ### 10. `ansible/status.yml`
-- **Purpose**: Non-destructive, read-only diagnostic playbook reporting base host identity/uptime, locales/keyboard layout, time/NTP synchronization, SSH daemon settings and authorized key fingerprints, UFW firewall status, LUKS container status, header backups, SMART health, Btrfs usage and error stats, `btrfs-snapshot-*` / `rclone-sync-*` systemd timers, `journald` logs, `rclone` remote configuration status, and GitHub Actions self-hosted runner health.
-- **Roles executed**: Modularly imports status tasks from `base`, `locales`, `ntp`, `sshd`, `ufw` (`hosts: all`), `crypto`, `snapshot`, `rclone` (`hosts: crypto`), and `runner` (`hosts: runner`).
+- **Purpose**: Non-destructive, read-only diagnostic playbook reporting base host identity/uptime, locales/keyboard layout, time/NTP synchronization, SSH daemon settings and authorized key fingerprints, UFW firewall status, Grafana Alloy status, S.M.A.R.T. disk monitoring health, LUKS container status, header backups, Btrfs usage, device error stats, periodic scrub verification, `btrfs-snapshot-*` / `rclone-sync-*` systemd timers, `journald` logs, `rclone` remote configuration status, and GitHub Actions self-hosted runner health.
+- **Roles executed**: Modularly imports status tasks from `base`, `locales`, `ntp`, `sshd`, `ufw`, `alloy`, `smartctl` (`hosts: all`), `crypto`, `snapshot`, `rclone` (`hosts: crypto`), and `runner` (`hosts: runner`).
 - **Usage**:
   ```bash
   # Full health report
@@ -364,6 +386,7 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags sshd
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags ufw
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags alloy
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags smartctl
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags crypto
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags snapshot
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags rclone

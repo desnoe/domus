@@ -24,3 +24,8 @@ alloy_service_memory_high: "256M"
 alloy_service_memory_max: "512M"
 alloy_service_io_class: "best-effort"
 alloy_service_io_priority: 7
+
+# S.M.A.R.T. metrics scrape configuration via smartctl_exporter
+alloy_smartctl_enabled: true
+alloy_smartctl_address: "127.0.0.1:9633"
+alloy_smartctl_scrape_interval: "120s"

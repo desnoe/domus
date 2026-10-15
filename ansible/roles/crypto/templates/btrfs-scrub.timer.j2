@@ -1,0 +1,11 @@
+# Managed by Ansible - do not edit manually
+[Unit]
+Description=Periodic Btrfs scrub timer for pool {{ crypto_disk_name }}
+Documentation=man:btrfs-scrub(8)
+
+[Timer]
+OnCalendar={{ crypto_scrub_oncalendar }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

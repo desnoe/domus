@@ -15,6 +15,29 @@
     state: stopped
   failed_when: false
 
+- name: "Stop any active systemd scrub timers for pool: {{ crypto_target_pool }}"
+  ansible.builtin.systemd:
+    name: "btrfs-scrub-{{ crypto_target_pool }}.timer"
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: "Stop any active systemd scrub services for pool: {{ crypto_target_pool }}"
+  ansible.builtin.systemd:
+    name: "btrfs-scrub-{{ crypto_target_pool }}.service"
+    state: stopped
+  failed_when: false
+
+- name: "Remove systemd scrub unit files for pool: {{ crypto_target_pool }}"
+  become: true
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/etc/systemd/system/btrfs-scrub-{{ crypto_target_pool }}.service"
+    - "/etc/systemd/system/btrfs-scrub-{{ crypto_target_pool }}.timer"
+
+
 - name: "Stop Samba service during pool removal to release active client connections: {{ crypto_target_pool }}"
   ansible.builtin.systemd:
     name: smbd

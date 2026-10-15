@@ -51,6 +51,22 @@
   changed_when: false
   failed_when: false
 
+- name: "Check Btrfs scrub status for pool: {{ current_disk.name }}"
+  become: true
+  ansible.builtin.command:
+    cmd: "btrfs scrub status {{ current_disk.subvolumes[0] }}"
+  register: crypto_btrfs_scrub_status_cmd
+  changed_when: false
+  failed_when: false
+
+- name: "Check Btrfs scrub timer status for pool: {{ current_disk.name }}"
+  become: true
+  ansible.builtin.command:
+    cmd: "systemctl status btrfs-scrub-{{ current_disk.name }}.timer"
+  register: crypto_btrfs_scrub_timer_cmd
+  changed_when: false
+  failed_when: false
+
 - name: "Display Status for Disk Pool: {{ current_disk.name }}"
   ansible.builtin.debug:
     msg: |
@@ -81,4 +97,9 @@
 
       --- BTRFS DEVICE STATS & INTEGRITY ---
       {{ crypto_btrfs_dev_stats_cmd.stdout | default('Device stats unavailable.', true) }}
+
+      --- BTRFS SCRUB & PERIODIC VERIFICATION ---
+      {{ crypto_btrfs_scrub_status_cmd.stdout | default('Scrub status unavailable.', true) }}
+      Scrub Timer:
+      {{ crypto_btrfs_scrub_timer_cmd.stdout | default('Timer unit not found.', true) }}
       =======================================================

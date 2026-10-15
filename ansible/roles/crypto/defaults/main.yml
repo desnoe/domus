@@ -40,3 +40,11 @@ crypto_no_compression_paths: []
 #       - /home/{{ ansible_user }}/data/sync
 #       - /home/{{ ansible_user }}/data/snapshots
 crypto_disks: []
+
+# Automated periodic Btrfs scrub configuration
+# Executes background read-and-checksum verification across all member devices of the pool.
+# Frequency: Monthly (run on the 1st Sunday of each month at 02:00:00).
+crypto_scrub_enabled: true
+crypto_scrub_oncalendar: "Sun *-*-1..7 02:00:00"
+crypto_scrub_io_class: "idle"
+crypto_scrub_nice: 19

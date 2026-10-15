@@ -181,13 +181,9 @@ uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --t
 
 ## 🛠️ Utility & Test Scripts (`scripts/`)
 
-The repository includes a lab integration test runner and helper shell utilities for batch image processing via ImageMagick (`magick`):
+The repository includes a modular lab integration test runner targeting `debian.delarche.fr`:
 
-- **[`scripts/test-lab.sh`](scripts/test-lab.sh)**: Modular non-regression test runner targeting `debian.delarche.fr` (`check-prereqs`, `system-and-ufw`, `storage-wipe-and-unlock`, `backup-and-sync`, `corner-cases-and-raid1`, `status`, `all`).
-- **[`scripts/image-convert.sh`](scripts/image-convert.sh)**: Parameterized CLI supporting A4 canvas centering (`--a4`), directory placement (`--alongside`), and quality adjustments.
-- **[`scripts/png2jpg.sh`](scripts/png2jpg.sh)**: Converts PNG images to optimized JPEG.
-- **[`scripts/png2jpga4.sh`](scripts/png2jpga4.sh)**: Centers PNG images onto a 300 DPI A4 white canvas.
-- **[`scripts/scan2jpg.sh`](scripts/scan2jpg.sh)**: Converts image scans alongside original source paths.
+- **[`scripts/test-lab.sh`](scripts/test-lab.sh)**: Automated non-regression test runner supporting granular subcommands (`check-prereqs`, `system-and-ufw`, `storage-wipe-and-unlock`, `backup-and-sync`, `samba`, `corner-cases-and-raid1`, `status`, `all`).
 
 ---
 

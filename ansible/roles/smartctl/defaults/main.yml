@@ -1,0 +1,31 @@
+---
+# Enablement flag for S.M.A.R.T. monitoring daemon
+smartctl_exporter_enabled: true
+
+# Target version of prometheus-community/smartctl_exporter
+smartctl_exporter_version: "0.15.0"
+
+# Architecture mapping from ansible_architecture to release archive architecture
+smartctl_exporter_arch_map:
+  x86_64: "amd64"
+  aarch64: "arm64"
+  armv7l: "armv7"
+  armv6l: "armv6"
+
+# Normalized architecture string
+smartctl_exporter_arch: "{{ smartctl_exporter_arch_map[ansible_architecture] | default('amd64') }}"
+
+# Archive filename and release download URL
+smartctl_exporter_archive_name: "smartctl_exporter-{{ smartctl_exporter_version }}.linux-{{ smartctl_exporter_arch }}.tar.gz"
+smartctl_exporter_download_url: >-
+  https://github.com/prometheus-community/smartctl_exporter/releases/download/v{{ smartctl_exporter_version }}/{{ smartctl_exporter_archive_name }}
+
+# Local binary destination
+smartctl_exporter_bin_path: "/usr/local/bin/smartctl_exporter"
+
+# Loopback listening host and port (never exposed publicly)
+smartctl_exporter_listen_address: "127.0.0.1:9633"
+
+# Systemd process sandboxing and cgroup resource boundaries
+smartctl_exporter_service_nice: 10
+smartctl_exporter_service_memory_max: "128M"
