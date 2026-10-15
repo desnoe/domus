@@ -1,0 +1,89 @@
+---
+- name: Install required S.M.A.R.T. tools and archive packages
+  when: smartctl_exporter_enabled | bool
+  become: true
+  ansible.builtin.apt:
+    state: present
+    name:
+      - smartmontools
+      - curl
+      - tar
+
+- name: Stat installed smartctl_exporter binary
+  become: true
+  ansible.builtin.stat:
+    path: "{{ smartctl_exporter_bin_path }}"
+  register: smartctl_bin_stat
+
+- name: Query installed smartctl_exporter version
+  when: smartctl_bin_stat.stat.exists
+  become: true
+  ansible.builtin.command:
+    cmd: "{{ smartctl_exporter_bin_path }} --version"
+  register: smartctl_installed_ver_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Determine whether smartctl_exporter binary requires installation
+  ansible.builtin.set_fact:
+    smartctl_needs_install: >-
+      {{
+        not smartctl_bin_stat.stat.exists or
+        (smartctl_installed_ver_cmd.stdout | default('')) is not search(smartctl_exporter_version)
+      }}
+
+- name: Download and unpack smartctl_exporter release binary
+  when:
+    - smartctl_exporter_enabled | bool
+    - smartctl_needs_install | bool
+  become: true
+  ansible.builtin.unarchive:
+    src: "{{ smartctl_exporter_download_url }}"
+    dest: /usr/local/bin
+    remote_src: true
+    extra_opts:
+      - "--strip-components=1"
+      - "smartctl_exporter-{{ smartctl_exporter_version }}.linux-{{ smartctl_exporter_arch }}/smartctl_exporter"
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart smartctl_exporter
+
+- name: Ensure smartctl_exporter binary ownership and permissions
+  when: smartctl_exporter_enabled | bool
+  become: true
+  ansible.builtin.file:
+    path: "{{ smartctl_exporter_bin_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy smartctl_exporter systemd service unit
+  when: smartctl_exporter_enabled | bool
+  become: true
+  ansible.builtin.template:
+    src: smartctl_exporter.service.j2
+    dest: /etc/systemd/system/smartctl_exporter.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd daemon
+    - Restart smartctl_exporter
+
+- name: Ensure smartctl_exporter service is enabled and started
+  when: smartctl_exporter_enabled | bool
+  become: true
+  ansible.builtin.systemd_service:
+    name: smartctl_exporter
+    enabled: true
+    state: started
+
+- name: Disable and stop smartctl_exporter service when disabled
+  when: not (smartctl_exporter_enabled | bool)
+  become: true
+  ansible.builtin.systemd_service:
+    name: smartctl_exporter
+    enabled: false
+    state: stopped
+  failed_when: false

@@ -1,0 +1,29 @@
+# Managed by Ansible - do not edit manually
+{% set mount_path = crypto_disk_subvolumes[0] | regex_replace('/+$', '') %}
+{% set mount_unit = crypto_scrub_mount_unit_cmd.stdout %}
+[Unit]
+Description=Btrfs periodic background scrub for pool {{ crypto_disk_name }} ({{ mount_path }})
+Documentation=man:btrfs-scrub(8)
+After={{ mount_unit }}
+Requisite={{ mount_unit }}
+PartOf={{ mount_unit }}
+AssertPathIsMountPoint={{ mount_path }}
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+SyslogIdentifier=btrfs-scrub-{{ crypto_disk_name }}
+
+# Scheduling priorities (zero disruption)
+Nice={{ crypto_scrub_nice }}
+IOSchedulingClass={{ crypto_scrub_io_class }}
+
+# Security & sandboxing
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/btrfs {{ mount_path }}
+
+ExecStart=/usr/bin/btrfs scrub start -B -d {{ mount_path }}

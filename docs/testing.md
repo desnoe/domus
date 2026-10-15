@@ -21,10 +21,10 @@ flowchart LR
 | Domain Prefix | Scope | Playbooks / Components Covered | Test Count |
 | :--- | :--- | :--- | :--- |
 | **`TC-QA`** | Static Quality Gates & Linting | `.pre-commit-config.yaml`, `.ansible-lint`, `.yamllint`, `shellcheck`, `vault.yml` | 2 |
-| **`TC-SYS`** | System Baseline, Locales, Time & SSH | `bootstrap.yml`, `system.yml`, `apt`, `base`, `locales`, `ntp`, `sshd`, `sudo`, `vim`, `htop` | 4 |
+| **`TC-SYS`** | System Baseline, Locales, Time, SSH & S.M.A.R.T. | `bootstrap.yml`, `system.yml`, `apt`, `base`, `locales`, `ntp`, `sshd`, `sudo`, `vim`, `htop`, `smartctl` | 5 |
 | **`TC-FW`** | Dual-Stack Firewall (`ufw`) | `system.yml`, `ufw` role, `iptables` / `ip6tables` kernel chains | 3 |
 | **`TC-OBS`** | Unified Observability & Telemetry | `system.yml`, `status.yml`, `alloy` role, Grafana Alloy HTTP probe | 2 |
-| **`TC-STO`** | Encrypted Storage & Btrfs RAID1 | `storage-wipe-and-reset.yml`, `storage-unlock.yml`, `storage-replace.yml`, `crypto` role | 4 |
+| **`TC-STO`** | Encrypted Storage & Btrfs RAID1 | `storage-wipe-and-reset.yml`, `storage-unlock.yml`, `storage-replace.yml`, `crypto` role | 8 |
 | **`TC-BAK`** | Cloud Sync & Btrfs Snapshots (`systemd`) | `backup.yml`, `status.yml`, `rclone` role, `snapshot` role | 7 |
 | **`TC-SMB`** | Samba File Sharing & Shadow Copies | `system.yml`, `status.yml`, `samba` role, `vfs_shadow_copy2`, `smbclient` | 7 |
 | **`TC-ADV`** | Advanced Corner Cases & Chaos Sequences | Unmounted pool guards, live unmount kill-switch, kernel sandboxing, ISO-week pruning, header recovery | 6 |
@@ -122,6 +122,24 @@ flowchart LR
 - **Expected Result**:
   - `sshd -T` reports `passwordauthentication no`, `permitrootlogin no`, `pubkeyauthentication yes`.
   - Every local key prints `Auth OK with <key_name>`.
+
+---
+
+### `TC-SYS-05` — S.M.A.R.T. Hardware Health Monitoring & `smartctl_exporter` Verification
+- **Objective**: Verify that `smartmontools` and `smartctl_exporter` are deployed, the exporter service is running sandboxed on loopback (`127.0.0.1:9633`), and `status.yml --tags smartctl` reports S.M.A.R.T. health cleanly.
+- **Preconditions**: `system.yml` applied.
+- **Commands**:
+  ```bash
+  ssh olivier@debian.delarche.fr "
+  sudo systemctl is-active smartctl_exporter | grep -q '^active$'
+  curl -fsS http://127.0.0.1:9633/metrics | grep -q 'smartctl_'
+  "
+  ANSIBLE_HOME=/tmp/.ansible uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags smartctl
+  ```
+- **Expected Result**:
+  - `systemctl is-active smartctl_exporter` reports `active`.
+  - HTTP probe to `http://127.0.0.1:9633/metrics` returns valid Prometheus metrics prefixed with `smartctl_`.
+  - `status.yml` prints the `S.M.A.R.T. MONITORING REPORT` with `Service: smartctl_exporter (active)` and positive device count.
 
 ---
 
@@ -314,6 +332,26 @@ flowchart LR
   - Btrfs filesystem profiles report `Data, RAID1` and `Metadata, RAID1`.
   - Both header backups `/var/backups/luks/luks-header-backup-{0,1}.img` exist with mode `0400`.
   - Scrub reports 0 errors (`sudo btrfs scrub start -B /home/olivier/backup`).
+
+---
+
+### `TC-STO-08` — Automated Periodic Btrfs Scrub Verification (`btrfs-scrub-*.timer` & `.service`)
+- **Objective**: Verify that monthly Btrfs scrub systemd timer units are installed, enabled, and active across all storage pools, that scrub operations can be executed on demand under idle I/O priority, and that scrub results are recorded cleanly in systemd journal logs.
+- **Preconditions**: Storage pools unlocked and mounted.
+- **Commands**:
+  ```bash
+  ssh olivier@debian.delarche.fr "
+  sudo systemctl is-enabled btrfs-scrub-data.timer | grep -q '^enabled$'
+  sudo systemctl is-active btrfs-scrub-data.timer | grep -q '^active$'
+  sudo systemctl start btrfs-scrub-data.service
+  sudo btrfs scrub status /home/olivier/data/sync | grep -E 'Scrub (started|finished)'
+  "
+  ANSIBLE_HOME=/tmp/.ansible uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags crypto
+  ```
+- **Expected Result**:
+  - `btrfs-scrub-data.timer` and `btrfs-scrub-backup.timer` are enabled and active.
+  - Manual execution of `btrfs-scrub-data.service` succeeds with `status: finished` and 0 errors.
+  - `status.yml --tags crypto` displays the Btrfs scrub status and active timer details under `BTRFS SCRUB & PERIODIC VERIFICATION`.
 
 ---
 

@@ -52,10 +52,49 @@
     group: "{{ ansible_user }}"
   loop: "{{ crypto_disk_subvolumes }}"
 
-- name: "Configure monthly Btrfs scrub cron job: {{ crypto_disk_name }}"
+- name: "Remove legacy cron scrub job: {{ crypto_disk_name }}"
   become: true
   ansible.builtin.cron:
     name: "btrfs scrub {{ crypto_disk_name }}"
-    user: "root"
-    special_time: "monthly"
-    job: "/usr/bin/btrfs scrub start -B {{ crypto_disk_subvolumes[0] }} >/dev/null 2>&1"
+    state: absent
+
+- name: "Resolve systemd mount unit name for scrub target: {{ crypto_disk_name }}"
+  become: true
+  ansible.builtin.command:
+    argv:
+      - systemd-escape
+      - --path
+      - --suffix=mount
+      - "{{ crypto_disk_subvolumes[0] | regex_replace('/+$', '') }}"
+  register: crypto_scrub_mount_unit_cmd
+  changed_when: false
+  check_mode: false
+
+- name: "Deploy Btrfs scrub systemd service unit: {{ crypto_disk_name }}"
+  when: crypto_scrub_enabled | bool
+  become: true
+  ansible.builtin.template:
+    src: btrfs-scrub.service.j2
+    dest: "/etc/systemd/system/btrfs-scrub-{{ crypto_disk_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: "Deploy Btrfs scrub systemd timer unit: {{ crypto_disk_name }}"
+  when: crypto_scrub_enabled | bool
+  become: true
+  ansible.builtin.template:
+    src: btrfs-scrub.timer.j2
+    dest: "/etc/systemd/system/btrfs-scrub-{{ crypto_disk_name }}.timer"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: "Enable and start Btrfs scrub systemd timer: {{ crypto_disk_name }}"
+  when: crypto_scrub_enabled | bool
+  become: true
+  ansible.builtin.systemd_service:
+    name: "btrfs-scrub-{{ crypto_disk_name }}.timer"
+    daemon_reload: true
+    enabled: true
+    state: started

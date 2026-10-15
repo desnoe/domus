@@ -69,6 +69,39 @@ prometheus.relabel "metrics_filter" {
   forward_to = [prometheus.remote_write.grafana_cloud.receiver]
 }
 
+{% if alloy_smartctl_enabled | default(false) %}
+// S.M.A.R.T. Disk Health Metrics (smartctl_exporter)
+prometheus.scrape "smartctl" {
+  targets         = [
+    {"__address__" = "{{ alloy_smartctl_address }}"},
+  ]
+  scrape_interval = "{{ alloy_smartctl_scrape_interval }}"
+  forward_to      = [prometheus.relabel.smartctl_filter.receiver]
+}
+
+prometheus.relabel "smartctl_filter" {
+  rule {
+    target_label = "instance"
+    replacement  = "{{ inventory_hostname }}"
+  }
+  rule {
+    target_label = "host"
+    replacement  = "{{ inventory_hostname }}"
+  }
+  rule {
+    target_label = "job"
+    replacement  = "integrations/smartctl"
+  }
+  rule {
+    source_labels = ["__name__"]
+    regex         = "up|smartctl_.*"
+    action        = "keep"
+  }
+
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+}
+{% endif %}
+
 prometheus.remote_write "grafana_cloud" {
   endpoint {
     url = "{{ alloy_grafana_cloud_metrics_url }}"

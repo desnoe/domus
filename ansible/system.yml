@@ -15,6 +15,10 @@
     - role: alloy
       tags:
         - alloy
+    - role: smartctl
+      tags:
+        - smartctl
+
 
 - name: Configure GitHub Actions self-hosted runner
   hosts: runner

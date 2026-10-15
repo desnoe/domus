@@ -82,9 +82,12 @@ step_system_and_ufw() {
     uv run ansible-playbook -i "${LAB_INVENTORY}" ansible/system.yml
     assert_playbook_idempotent ansible/system.yml
 
+    # TC-SYS-01, TC-FW-03, TC-SYS-05: Daemon status, Alloy & smartctl_exporter endpoints, UFW drift
     run_remote << 'EOF'
 sudo systemctl is-active alloy | grep -q "^active$"
 curl -fsS http://127.0.0.1:12345/-/ready > /dev/null
+sudo systemctl is-active smartctl_exporter | grep -q "^active$"
+curl -fsS http://127.0.0.1:9633/metrics | grep -q "smartctl_"
 sudo ufw status verbose | grep -q "12345/tcp"
 sudo ufw disable
 EOF
@@ -97,8 +100,18 @@ EOF
 }
 
 step_storage_wipe_and_unlock() {
+    # TC-STO-01..02, TC-STO-08: Storage wipe, unlock idempotence, and Btrfs scrub units
     uv run ansible-playbook -i "${LAB_INVENTORY}" ansible/storage-wipe-and-reset.yml -e confirm_wipe=yes
     assert_playbook_idempotent ansible/storage-unlock.yml
+
+    run_remote << 'EOF'
+sudo systemctl is-enabled btrfs-scrub-data.timer | grep -q "^enabled$"
+sudo systemctl is-active btrfs-scrub-data.timer | grep -q "^active$"
+sudo systemctl is-enabled btrfs-scrub-backup.timer | grep -q "^enabled$"
+sudo systemctl is-active btrfs-scrub-backup.timer | grep -q "^active$"
+sudo systemctl start btrfs-scrub-data.service
+sudo btrfs scrub status /home/olivier/data/sync | grep -q "Scrub started\|finished"
+EOF
 }
 
 step_backup_and_sync() {
@@ -201,28 +214,34 @@ systemctl is-active smbd
 ss -tlnp sport = :445 | grep -q ':445'
 EOF
 
-    local samba_pass
+    local samba_pass target_ip
     samba_pass="$(uv run ansible-vault view \
         ansible/envs/lab/host_vars/debian.delarche.fr/vault.yml \
         | grep '^samba_pass:' | sed 's/^samba_pass: *//' | tr -d '"')"
+    target_ip="$(ssh -G "${LAB_HOST}" 2>/dev/null | awk '$1 == "hostname" {print $2}')"
+    target_ip="${target_ip:-${LAB_HOST}}"
 
     # TC-SMB-02: Connect and list share files (data and backup shares)
     smbclient "//${LAB_HOST}/data" \
+        -I "${target_ip}" \
         -U "${LAB_USER}%${samba_pass}" \
         --max-protocol=SMB3 \
         -c "ls" | grep -q '\.'
 
     smbclient "//${LAB_HOST}/backup" \
+        -I "${target_ip}" \
         -U "${LAB_USER}%${samba_pass}" \
         --max-protocol=SMB3 \
         -c "ls" | grep -q '\.'
 
     smbclient "//${LAB_HOST}/data-snapshots" \
+        -I "${target_ip}" \
         -U "${LAB_USER}%${samba_pass}" \
         --max-protocol=SMB3 \
         -c "ls" | grep -q '\.'
 
     smbclient "//${LAB_HOST}/backup-snapshots" \
+        -I "${target_ip}" \
         -U "${LAB_USER}%${samba_pass}" \
         --max-protocol=SMB3 \
         -c "ls" | grep -q '\.'
@@ -237,6 +256,7 @@ EOF
 
     # TC-SMB-04: Read-only enforcement (file upload must be rejected)
     if smbclient "//${LAB_HOST}/data" \
+        -I "${target_ip}" \
         -U "${LAB_USER}%${samba_pass}" \
         --max-protocol=SMB3 \
         -c "put /dev/null test_write_must_fail" 2>&1; then
@@ -245,6 +265,7 @@ EOF
     fi
 
     if smbclient "//${LAB_HOST}/backup" \
+        -I "${target_ip}" \
         -U "${LAB_USER}%${samba_pass}" \
         --max-protocol=SMB3 \
         -c "put /dev/null test_write_must_fail" 2>&1; then
@@ -253,6 +274,7 @@ EOF
     fi
 
     if smbclient "//${LAB_HOST}/data-snapshots" \
+        -I "${target_ip}" \
         -U "${LAB_USER}%${samba_pass}" \
         --max-protocol=SMB3 \
         -c "put /dev/null test_write_must_fail" 2>&1; then
@@ -262,6 +284,7 @@ EOF
 
     # TC-SMB-07: Minimum SMB3 protocol enforcement (NT1 / SMB1 must be rejected)
     if smbclient "//${LAB_HOST}/data" \
+        -I "${target_ip}" \
         -U "${LAB_USER}%${samba_pass}" \
         --max-protocol=NT1 \
         -c "ls" 2>&1; then
@@ -392,8 +415,8 @@ Usage: ./scripts/test-lab.sh <subcommand>
 
 Subcommands:
   check-prereqs            Verify Vault password, rclone.conf, and SSH/sudo access to debian.delarche.fr
-  system-and-ufw           Verify system.yml idempotence and UFW drift remediation (TC-SYS-01, TC-FW-03)
-  storage-wipe-and-unlock  Run storage-wipe-and-reset.yml and verify storage-unlock.yml idempotence (TC-STO-01..02)
+  system-and-ufw           Verify system.yml idempotence, UFW drift, and S.M.A.R.T. monitoring (TC-SYS-01, TC-FW-03, TC-SYS-05)
+  storage-wipe-and-unlock  Run storage-wipe-and-reset.yml, verify unlock idempotence, and Btrfs scrub (TC-STO-01..02, TC-STO-08)
   backup-and-sync          Verify backup.yml idempotence, OneDrive sync (primary & secondary), snapshots, TC-BAK-05..07
   samba                    Deploy Samba, verify idempotence, SMB connectivity, shadow copies, and security (TC-SMB-01..07)
   corner-cases-and-raid1   Run TC-ADV-01..06, RAID1 disk replacement, pool removal, disk add/remove (TC-STO-04..07)

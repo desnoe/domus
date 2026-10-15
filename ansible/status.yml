@@ -77,6 +77,19 @@
         - alloy
         - status
 
+    - name: Report S.M.A.R.T. disk monitoring status
+      ansible.builtin.include_role:
+        name: smartctl
+        tasks_from: status
+        apply:
+          tags:
+            - smartctl
+            - status
+      tags:
+        - smartctl
+        - status
+
+
 - name: Report storage and backup status
   hosts: crypto
   become: true

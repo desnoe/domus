@@ -115,31 +115,33 @@ During architectural design, two premier telemetry agents were evaluated:
 
 ---
 
-### Milestone 1.2 — S.M.A.R.T. Hardware Health & Automated Btrfs Scrub
+### Milestone 1.2 — S.M.A.R.T. Hardware Health & Automated Btrfs Scrub `[Implemented]`
 
-Integrate proactive disk degradation detection before silent hardware failure causes data loss.
+Proactive disk degradation detection before silent hardware failure causes data loss, deployed across all hosts and storage pools:
 
-#### Architectural Specifications
+#### Architectural Implementation
 
-1. **S.M.A.R.T. Disk Health Monitoring**:
-   - Deploy `smartmontools` across all nodes with physical disks (`crypto` hosts).
-   - Enable `smartctl` metrics collection inside Grafana Alloy via `smartctl_exporter` collector component.
-   - Track key reliability indicators:
+1. **S.M.A.R.T. Disk Health Monitoring (`ansible/roles/smartctl`)**:
+   - Deployed `smartmontools` and the official `prometheus-community/smartctl_exporter` (`v0.15.0`) across all nodes (`hosts: all`).
+   - Hardened `smartctl_exporter.service` bound strictly to loopback (`127.0.0.1:9633`), isolated via `ProtectSystem=strict`, `ProtectHome=true`, `PrivateTmp=true`, and `NoNewPrivileges=true`.
+   - Enabled native S.M.A.R.T. scraping inside Grafana Alloy (`prometheus.scrape "smartctl"`, 120s interval), forwarding `smartctl_.*` metrics to Grafana Cloud.
+   - Tracks key reliability indicators:
      - Reallocated Sector Count (`Attribute 5`)
      - Current Pending Sector Count (`Attribute 197`)
      - Offline Uncorrectable Sector Count (`Attribute 198`)
      - SSD / NVMe Percentage Used & Available Spare
      - Operating temperature thresholds.
 
-2. **Automated Periodic Btrfs Scrub**:
-   - Implement declarative `btrfs-scrub-<pool>.timer` and `.service` units in `ansible/roles/crypto`.
-   - Frequency: Monthly (run on the 1st Sunday of each month at 02:00).
+2. **Automated Periodic Btrfs Scrub (`ansible/roles/crypto`)**:
+   - Implemented declarative `btrfs-scrub-<pool>.timer` and `.service` units in `ansible/roles/crypto`.
+   - Frequency: Monthly (1st Sunday of each month at 02:00 via `OnCalendar=Sun *-*-1..7 02:00:00`, `Persistent=true`).
    - Executes background read-and-checksum verification across all member devices of the Btrfs pool:
      ```bash
      btrfs scrub start -B -d /home/olivier/data/sync
      ```
-   - Exports scrub completion metrics and checksum error counters (`csum_errors`, `verify_errors`, `read_errors`) to Alloy.
-   - Zero disruption: I/O priority set to idle class (`IOSchedulingClass=idle`) to avoid impacting interactive operations.
+   - Zero disruption: I/O priority set to idle class (`IOSchedulingClass=idle`, `Nice=19`).
+   - Sandboxing: `ProtectSystem=strict`, `ProtectHome=read-only`, `ReadWritePaths=/var/lib/btrfs`.
+   - Automated error propagation: Scrub output streams into systemd journald (ingested by Loki via Alloy), while any checksum/read errors update kernel stats (`btrfs device stats`), automatically incrementing `node_btrfs_device_errors_total` exported to Prometheus.
 
 ---
 

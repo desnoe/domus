@@ -85,10 +85,10 @@ jobs:
       - name: Verify local runner prerequisites (Vault, Rclone, Lab SSH)
         run: ./scripts/test-lab.sh check-prereqs
 
-      - name: "Step 1: System Baseline Idempotence & UFW Drift Remediation (TC-SYS-01, TC-FW-03)"
+      - name: "Step 1: System Baseline Idempotence, UFW Drift Remediation & S.M.A.R.T. Monitoring (TC-SYS-01, TC-FW-03, TC-SYS-05)"
         run: ./scripts/test-lab.sh system-and-ufw
 
-      - name: "Step 2: Storage Wipe & Unlock Idempotence (TC-STO-01..02)"
+      - name: "Step 2: Storage Wipe, Unlock Idempotence & Automated Btrfs Scrub (TC-STO-01..02, TC-STO-08)"
         run: ./scripts/test-lab.sh storage-wipe-and-unlock
 
       - name: "Step 3: Backup Idempotence, OneDrive Sync & Btrfs Snapshot (TC-BAK-01..03)"

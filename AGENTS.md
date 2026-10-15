@@ -40,6 +40,11 @@
   - Any new role variable in `defaults/main.yml` (e.g. `crypto_no_compression_paths`, `crypto_perf_flags`, `rclone_service_nice`), new playbook, task, or operational behavior change must be fully documented with its purpose, default value, YAML schema, and architectural rationale.
   - Never treat documentation as an afterthought; documentation parity is a hard requirement for completing any task.
 
+- **Privilege & Controller Host Isolation**:
+  - AI agents must **NEVER** execute `sudo` on the controller (local workstation/Mac). Never run commands that prompt for or require superuser privileges locally.
+  - All privileged operations must strictly be executed on managed remote hosts via Ansible (`become: true`) or standard remote mechanisms.
+  - Local resolution or connectivity workarounds must use user-level configurations (e.g. `~/.ssh/config`) or non-privileged flags instead of modifying system files like `/etc/hosts`.
+
 - **Pre-commit & Code Quality**:
   - All contributions must pass `uv run pre-commit run --all-files` with a clean exit code (`0`).
   - Linters enforced at maximum strictness: `ansible-lint --strict` (`profile: production`), `yamllint --strict` (`level: error`), `shellcheck --severity=style`, `check-ansible-vault`, and `pre-commit-hooks` (`v5.0.0`).

@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  author: Olivier Desnoë
+  description: S.M.A.R.T. disk health monitoring and smartctl_exporter service deployment
+  license: MIT
+  min_ansible_version: "2.16.0"
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+dependencies: []
