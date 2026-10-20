@@ -194,9 +194,13 @@ Configures hardware layout and backup targets:
 ### 3. Unified Observability & Telemetry (`alloy`)
 The `alloy` role provisions Grafana Alloy on all infrastructure nodes to collect system, Btrfs storage, and journald telemetry, streaming metrics and structured logs to Grafana Cloud Free Tier:
 - **Metrics Pipeline (`prometheus.exporter.unix`)**:
-  - Automatically monitors CPU, RAM, load, system temperatures, network interfaces, block device/LUKS mapper throughput (`diskstats`), and Btrfs filesystem usage across all subvolumes.
+  - Automatically monitors CPU, RAM, load, process run queue and I/O wait states (`node_procs_running`, `node_procs_blocked`), NTP kernel synchronization (`node_timex_sync_status`, `node_timex_maxerror_seconds`), system temperatures, network interfaces, block device/LUKS mapper throughput (`diskstats`), device errors (`node_filesystem_device_error`), inode capacity (`node_filesystem_files`), Btrfs filesystem usage across all subvolumes, Btrfs redundancy allocation ratio (`node_btrfs_allocation_ratio`), and unallocated physical device space (`node_btrfs_device_unused_bytes`).
+  - Includes `systemd` unit state collector (`alloy_systemd_collector_enabled: true`), filtered via include regex `alloy_systemd_unit_include` to track critical backup, storage, and networking services (`node_systemd_unit_state`).
   - Applies relabeling rules dropping high-cardinality series (per-CPU frequency, cgroup memory churn) to remain well below 1,500 series across all domestic nodes.
   - Ships metrics via `prometheus.remote_write` to Grafana Cloud Mimir (`alloy_grafana_cloud_metrics_url`).
+- **Alloy Self-Monitoring (`alloy_self_metrics_enabled`)**:
+  - Scrapes the internal Alloy HTTP endpoint (`127.0.0.1:12345/metrics`) every `alloy_self_metrics_scrape_interval` (`60s`) with job label `integrations/alloy`.
+  - Captures Alloy process CPU, memory RSS, active goroutines, scrape target health, and remote-write sample/log delivery rates.
 - **Log Pipeline (`loki.source.journal`)**:
   - Scrapes local `systemd-journald` log streams natively.
   - Applies strict whitelist relabeling to only ship logs from targeted units (`sshd.service`, `smbd.service`, `rclone-sync-*.service`, `btrfs-snapshot-*.service`, `kernel`, `ufw`) or system-wide errors with priority $\le$ 3 (`emerg`, `alert`, `crit`, `err`).
@@ -206,6 +210,22 @@ The `alloy` role provisions Grafana Alloy on all infrastructure nodes to collect
   - Local debugging web UI (`12345/tcp`) is accessible from the LAN (`alloy_allowed_subnet: "192.168.1.0/24"`) via UFW.
   - Operates safely in standalone/local mode when Grafana Cloud credentials are omitted (e.g. CI or local test labs).
   - Scrapes local `smartctl_exporter` on loopback (`alloy_smartctl_address: "127.0.0.1:9633"`) every `alloy_smartctl_scrape_interval: "120s"`, forwarding `smartctl_.*` metrics with job label `integrations/smartctl`.
+
+- **Role Variables (`defaults/main.yml`)**:
+  - `alloy_enabled`: Global enablement toggle for Alloy daemon (default: `true`).
+  - `alloy_listen_addr`: Listen address for Alloy internal UI and metrics API (default: `"0.0.0.0:12345"`).
+  - `alloy_allowed_subnet`: CIDR subnet allowed to reach port 12345 via UFW (default: `"192.168.1.0/24"`).
+  - `alloy_grafana_cloud_metrics_url`: Mimir push endpoint for metrics.
+  - `alloy_grafana_cloud_logs_url`: Loki push endpoint for journal logs.
+  - `alloy_service_nice`: Process nice priority (default: `15`).
+  - `alloy_service_memory_high` / `alloy_service_memory_max`: Cgroup memory boundaries (`"256M"` / `"512M"`).
+  - `alloy_smartctl_enabled`: Scrape `smartctl_exporter` on loopback (default: `true`).
+  - `alloy_smartctl_address`: Address of `smartctl_exporter` (default: `"127.0.0.1:9633"`).
+  - `alloy_smartctl_scrape_interval`: S.M.A.R.T. scrape interval (default: `"120s"`).
+  - `alloy_self_metrics_enabled`: Scrape Alloy internal metrics (default: `true`).
+  - `alloy_self_metrics_scrape_interval`: Internal scrape interval (default: `"60s"`).
+  - `alloy_systemd_collector_enabled`: Enable node exporter systemd unit state collector (default: `true`).
+  - `alloy_systemd_unit_include`: Regex pattern of units to track (default: `"^(rclone-sync-.*|btrfs-snapshot-.*|btrfs-scrub-.*|smbd|alloy|smartctl_exporter|ufw|ssh)[.]service$"`).
 
 
 ### 4. S.M.A.R.T. Disk Health Monitoring (`smartctl`)
@@ -223,7 +243,27 @@ The `smartctl` role provisions hardware disk degradation detection across all no
   - `smartctl_exporter_service_memory_max`: Hard memory cgroup limit (default: `"128M"`).
 
 
-### 5. Encrypted Secrets (`ansible/envs/<env>/host_vars/<hostname>/vault.yml`)
+### 5. Declarative Dashboards as Code (`dashboards/`)
+Telemetry visualization across domestic nodes is defined entirely as code in a standalone Go module (`dashboards/`) utilizing the official **Grafana Foundation SDK** (`dashboardv2`):
+- **Dashboard Suite (`dashboards/internal/dashboards/`)**:
+  - **Host & System Overview (`domus-host`)**: 4-metric synthesis header (Uptime, CPU Busy, Memory Used, Load 1m), followed by detailed CPU utilization breakdown, memory allocation, system thermals, load averages, process execution states (running vs blocked on I/O), system uptime and OS/kernel version metadata (`node_uname_info`), NTP time synchronization status and estimated maximum error, file descriptor saturation, network bandwidth, packet drops/errors, and TCP socket states.
+  - **Encrypted Storage & Btrfs (`domus-storage`)**: 4-metric synthesis header (S.M.A.R.T. Drive Health, Critical Sectors, Storage Capacity Used, Disk IO Rate), followed by block device and LUKS mapper I/O throughput, I/O latency, underlying filesystem device errors, inode capacity and exhaustion tracking, Btrfs filesystem usage and total capacity, Btrfs chunk allocations (Data/Metadata/System), Btrfs redundancy allocation ratio, unallocated physical device space, Btrfs global reserve, S.M.A.R.T. disk health status, smartctl exit status codes, ATA error log entries (`smartctl_device_error_log_count`), drive rotational speed and media type (`smartctl_device_rotation_rate`), drive raw capacity, power cycle count, temperatures, power-on hours, and critical sector counts.
+  - **Backup & Cloud Sync Pipelines (`domus-backups`)**: 4-metric synthesis header (Failed Services with active failure filtering, Active Daemons, Active Backup Execution with text-mapped Idle/Syncing states, and 24h Audit Log Errors), followed by an interactive Monitored Services Inventory table (`table`) with colored state badges, Active Service Failures alert card, a 24-Hour Service Execution Timeline (`statetimeline`), and a full-width Loki journald log stream (`logs`) capturing rclone, snapshot, scrub, smartctl, alloy, and samba operations.
+  - **Alloy Telemetry Health (`domus-alloy-health`)**: 4-metric synthesis header (Alloy Agent Status, Memory RSS, Samples Sent Rate, Log Streams Rate), followed by Alloy process CPU usage, memory RSS, active goroutines, scrape target health, Prometheus remote-write sample push rates and failures, and Loki log stream delivery throughput.
+- **Dynamic Scoping & Templating**:
+  - Every dashboard includes a single-select dynamic `$host` template variable querying `label_values(up{job="integrations/node_exporter"}, host)` from Mimir, defaulting to `kodlix.delarche.fr` with strict single-host scoping (`Multi(false)`, `IncludeAll(false)`).
+- **Pre-Commit Previews & CI/CD Pipeline**:
+  - **Ephemeral Local Previews**: Developers can preview their dashboards in Grafana Cloud before committing via `./scripts/dashboards.sh preview [branch]`. Dashboards and temporary folders are isolated under `domus-prev-<branch>` and cleaned up with `./scripts/dashboards.sh clean-preview [branch]`. Passing `--verify-data` executes live non-regression verification on the pushed preview.
+  - **Automated Live Non-Regression Testing**: `./scripts/dashboards.sh test-live [branch]` deploys an ephemeral preview, verifies that the `$host` dropdown contains online hosts, validates that every panel across all 4 dashboards returns live telemetry without downstream query errors, validates headless snapshot renders, and automatically deletes the preview folder on exit.
+  - **Continuous Delivery**: The GitHub Actions workflow (`.github/workflows/dashboards.yml`) deploys preview dashboards for pull requests (`domus-pr-<PR>`), runs live non-regression verification, removes them when PRs are closed, and automatically deploys production dashboards to the `domus` folder when merged to `main`.
+- **Validation & Pre-Commit Quality Standards**:
+  - **Formatting**: `gofmt -s` enforced on all Go files in `dashboards/`.
+  - **Static Analysis & Linting**: `go vet ./...` and `staticcheck ./...` executed across all packages.
+  - **Unit Testing**: Go unit tests with race detection (`go test -race ./...`) covering `builder` and `dashboards` packages.
+  - **Cloud Schema Validation**: `./scripts/dashboards.sh validate` generates and verifies production and preview manifests against Grafana Cloud via `gcx --context domus resources validate`.
+
+
+### 6. Encrypted Secrets (`ansible/envs/<env>/host_vars/<hostname>/vault.yml`)
 > [!IMPORTANT]
 > All sensitive credentials and secrets are encrypted with `ansible-vault` (AES-256) using password file `~/.ansible_vault_pass`.
 
@@ -360,7 +400,19 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/storage-remove.yml -e remove_pool=backup -e confirm_remove=yes
   ```
 
-### 9. `ansible/backup.yml`
+### 9. `ansible/storage-normalize-unicode.yml`
+- **Purpose**: Normalizes filenames on encrypted Btrfs storage pools to UTF-8 NFC (composed form) via `convmv` to ensure seamless cross-platform compatibility between macOS Finder, Samba (`fruit:encoding = native`), and Linux.
+- **Target hosts**: `hosts: crypto`
+- **Usage**:
+  ```bash
+  # Default target path (/home/{{ ansible_user }}/backup/sync/googledrive/macbookpro)
+  uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/storage-normalize-unicode.yml
+
+  # Custom target path
+  uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/storage-normalize-unicode.yml -e target_path="/home/olivier/backup/sync/googledrive/macbookpro"
+  ```
+
+### 10. `ansible/backup.yml`
 - **Purpose**: Configures automated Btrfs snapshot and cloud synchronization `systemd` services and timers.
 - **Target hosts**: `hosts: crypto`
 - **Roles executed**:
@@ -371,9 +423,9 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/backup.yml
   ```
 
-### 10. `ansible/status.yml`
-- **Purpose**: Non-destructive, read-only diagnostic playbook reporting base host identity/uptime, locales/keyboard layout, time/NTP synchronization, SSH daemon settings and authorized key fingerprints, UFW firewall status, Grafana Alloy status, S.M.A.R.T. disk monitoring health, LUKS container status, header backups, Btrfs usage, device error stats, periodic scrub verification, `btrfs-snapshot-*` / `rclone-sync-*` systemd timers, `journald` logs, `rclone` remote configuration status, and GitHub Actions self-hosted runner health.
-- **Roles executed**: Modularly imports status tasks from `base`, `locales`, `ntp`, `sshd`, `ufw`, `alloy`, `smartctl` (`hosts: all`), `crypto`, `snapshot`, `rclone` (`hosts: crypto`), and `runner` (`hosts: runner`).
+### 11. `ansible/status.yml`
+- **Purpose**: Non-destructive, read-only diagnostic playbook reporting base host identity/uptime, locales/keyboard layout, time/NTP synchronization, SSH daemon settings and authorized key fingerprints, UFW firewall status, Grafana Alloy status, S.M.A.R.T. disk monitoring health, LUKS container status, header backups, Btrfs usage, device error stats, periodic scrub verification, `btrfs-snapshot-*` / `rclone-sync-*` systemd timers, `journald` logs, `rclone` remote configuration status, Samba file sharing status, and GitHub Actions self-hosted runner health.
+- **Roles executed**: Modularly imports status tasks from `base`, `locales`, `ntp`, `sshd`, `ufw`, `alloy`, `smartctl` (`hosts: all`), `crypto`, `snapshot`, `rclone`, `samba` (`hosts: crypto`), and `runner` (`hosts: runner`).
 - **Usage**:
   ```bash
   # Full health report
@@ -390,6 +442,7 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags crypto
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags snapshot
   uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags rclone
+  uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags samba
   uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/status.yml --limit runner.delarche.fr --tags runner
   ```
 
@@ -411,13 +464,14 @@ uv run ansible-vault encrypt ansible/envs/live/host_vars/newhost/vault.yml
 | **`alloy`** | Provisions Grafana Alloy daemon for unified host and Btrfs storage telemetry with Prometheus node exporter, Loki journald log forwarding, systemd sandboxing (`ProtectSystem=strict`, `MemoryMax=512M`, `Nice=15`), UFW LAN web interface rules (`12345/tcp`), and Grafana Cloud remote write. | `/etc/alloy/config.alloy`, `/etc/default/alloy`, `/etc/systemd/system/alloy.service.d/override.conf`, `alloy` service |
 | **`apt`** | Ensures `sudo` and package tools are installed; upgrades system package cache; configures automatic security updates (`unattended-upgrades`). | `apt` cache, `/etc/apt/apt.conf.d/20auto-upgrades` |
 | **`base`** | Installs common utilities (`bash-completion`, `curl`, `git`, `man-db`, `rsync`, `tree`, `unzip`, `wget`), configures the live system hostname via `ansible.builtin.hostname`, and installs customized `.bashrc`. | `/etc/hostname`, `~/.bashrc`, `/root/.bashrc` |
-| **`crypto`** | Manages the full encrypted storage stack across 0, 1, or N volumes (`crypto_disks`) with single or multi-device Btrfs native RAID1: per-device LUKS format/open via memory/stdin with inline AES hardware acceleration (`crypto_perf_flags`), automated LUKS header backups (`/var/backups/luks/`), kernel device scanning (`btrfs device scan`), direct Btrfs formatting with semantic labels and automatic RAID1 mirroring, declarative absolute subvolume mounts with flattened internal subvolume names and zstd compression, declarative per-directory non-compression attributes (`crypto_no_compression_paths`), label-based fstab integration (`LABEL=<name>`), and monthly Btrfs scrub cron. | `/dev/mapper/<name>-<idx>`, `/var/backups/luks/`, `/etc/fstab` |
+| **`crypto`** | Manages the full encrypted storage stack across 0, 1, or N volumes (`crypto_disks`) with single or multi-device Btrfs native RAID1: per-device LUKS format/open via memory/stdin with inline AES hardware acceleration (`crypto_perf_flags`), automated LUKS header backups (`/var/backups/luks/`), kernel device scanning (`btrfs device scan`), direct Btrfs formatting with semantic labels and automatic RAID1 mirroring, declarative absolute subvolume mounts with flattened internal subvolume names and zstd compression, declarative per-directory non-compression attributes (`crypto_no_compression_paths`), label-based fstab integration (`LABEL=<name>`), and monthly Btrfs scrub systemd timer (`btrfs-scrub-<pool>.{service,timer}`). | `/dev/mapper/<name>-<idx>`, `/var/backups/luks/`, `/etc/fstab`, `/etc/systemd/system/btrfs-scrub-*.{service,timer}` |
 | **`htop`** | Installs `htop` and seeds initial user configuration (`force: false`). | `~/.config/htop/htoprc` |
 | **`locales`** | Generates `en_US.UTF-8` and `fr_FR.UTF-8` locales, configures English system UI (`LANG=en_US.UTF-8`) with French regional categories (`LC_TIME`, `LC_MEASUREMENT`, `LC_PAPER`, `LC_MONETARY=fr_FR.UTF-8`) in `/etc/locale.conf` (symlinked from `/etc/default/locale`), and configures French AZERTY keyboard (`fr`/`latin9`). | `/etc/locale.conf`, `/etc/default/locale`, `/etc/default/keyboard` |
 | **`ntp`** | Sets timezone (`Europe/Paris`) and configures `chrony` (`fr.pool.ntp.org`, `rtcsync`, `leapseclist`, and `leapsecmode slew` for monotonic leap seconds). | `/etc/chrony/chrony.conf`, `tzdata`, `chrony` service |
 | **`rclone`** | Installs `rclone`, seeds local `~/.config/rclone/rclone.conf` if not already present (`force: false`, `mode: "0600"`, `no_log: true`), and deploys sandboxed `systemd` service and timer units (`rclone-sync-<slug>.{service,timer}`) invoking `/usr/bin/rclone sync` directly with kernel mount protection (`Requisite=`, `BindsTo=`, `AssertPathIsMountPoint=`), `ProtectSystem=strict`, and gentle background scheduling (`Nice=10`, `IOSchedulingClass=best-effort`, `IOSchedulingPriority=6`). | `~/.config/rclone/rclone.conf`, `/etc/systemd/system/rclone-sync-*.{service,timer}` |
 | **`runner`** | Installs CI/CD and .NET runtime dependencies (`git`, `curl`, `jq`, `shellcheck`, `rsync`, `libicu-dev`, `libssl-dev`), copies local `~/.ansible_vault_pass` (`mode: "0600"`, `no_log: true`) and `~/.config/rclone/rclone.conf` (`mode: "0600"`, `no_log: true`), generates `/home/{{ ansible_user }}/.ssh/id_ed25519` on the runner, adds `debian.delarche.fr` to `known_hosts`, authorizes the runner's public key on `debian.delarche.fr`, and installs/upgrades the official GitHub Actions Runner (`actions/runner`) release in `/opt/actions-runner`. | `/opt/actions-runner`, `~/.ansible_vault_pass`, `~/.config/rclone/rclone.conf`, `~/.ssh/id_ed25519` |
 | **`samba`** | Deploys Samba SMB3 service on `crypto` hosts: serves Btrfs subvolumes in read-only mode with native Windows and macOS Previous Versions support via `vfs_shadow_copy2` mapped to `btrfs-snapshot` retention directories, provisions vault-encrypted credentials via `smbpasswd`, ensures `~/data/sync/mac` target directory exists when mounted, and configures LAN-restricted UFW firewall rules (port 445/tcp). | `/etc/samba/smb.conf`, `smbd` service, `/home/{{ ansible_user }}/data/sync/mac` |
+| **`smartctl`** | Installs and provisions Prometheus `smartctl_exporter` for continuous S.M.A.R.T. disk telemetry, monitoring disk attributes, temperatures, and sector counters across SATA SSDs and HDDs. Sandboxed via systemd (`CapabilityBoundingSet=CAP_SYS_RAWIO CAP_SYS_ADMIN`). | `/usr/local/bin/smartctl_exporter`, `/etc/systemd/system/smartctl_exporter.service`, `smartctl_exporter` service |
 | **`snapshot`** | Manages Btrfs snapshot automation: deploys streamlined `/home/{{ ansible_user }}/bin/snapshot.sh` (30 daily + 52 weekly ISO retention) and configures sandboxed `systemd` service and timer units (`btrfs-snapshot-<name>.{service,timer}`) with dual mount binding and read-only source protection (`ProtectSystem=strict`, `ReadWritePaths={{ item.destination }}`). | `/home/{{ ansible_user }}/bin/snapshot.sh`, `/etc/systemd/system/btrfs-snapshot-*.{service,timer}` |
 | **`sshd`** | Automatically discovers all local `~/.ssh/*.pub` public keys and ensures they are present in `~/.ssh/authorized_keys` (`exclusive: false`), and hardens `/etc/ssh/sshd_config` (disables root login and password authentication, validated via `sshd -t -f %s`). | `/etc/ssh/sshd_config`, `~/.ssh/authorized_keys` |
 | **`sudo`** | Creates `wheel` group, configures `/etc/sudoers.d/99-ansible-wheel` (validated via `visudo`), and configures user `{{ ansible_user }}` with wheel group membership and bash shell without managing local passwords. | `/etc/sudoers.d/99-ansible-wheel`, `/etc/passwd` |

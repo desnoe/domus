@@ -9,7 +9,7 @@ Infrastructure as Code (IaC) repository for provisioning, hardening, and managin
 - **Host Provisioning**: Bootstrap minimal Debian systems with automated user management (`ansible_user`), SSH hardening, and sudo rights.
 - **Layered Storage Security**:
   - **LUKS**: Block-level encryption with AES-256 (`luks_pass`) on each member device, featuring inline hardware AES acceleration (`crypto_perf_flags`) bypassing asynchronous workqueues.
-  - **Btrfs**: Filesystem management directly on decrypted LUKS containers with native RAID1 mirroring for multi-device pools, declarative subvolume mount paths, transparent zstd compression (with declarative per-directory uncompressed opt-outs via `crypto_no_compression_paths`), and automated fstab integration.
+  - **Btrfs**: Filesystem management directly on decrypted LUKS containers with native RAID1 mirroring for multi-device pools, declarative subvolume mount paths, transparent zstd compression (with declarative per-directory uncompressed opt-outs via `crypto_no_compression_paths`), automated fstab integration, and monthly periodic checksum scrubs (`btrfs-scrub-<pool>.timer`).
 - **Automated Backups**:
   - Daily read-only Btrfs snapshots (`btrfs-snapshot-<name>.timer` / `.service` at 05:00) bound to source and destination `.mount` units and sandboxed with read-only source protection.
   - Multi-cloud synchronization via `rclone` (`rclone-sync-<slug>.timer` / `.service` starting at 04:00) using direct `/usr/bin/rclone sync` execution, kernel mount binding, `ProtectSystem=strict` sandboxing, and gentle background scheduling (`Nice=10`, `IOSchedulingClass=best-effort`, `IOSchedulingPriority=6`).
@@ -17,10 +17,15 @@ Infrastructure as Code (IaC) repository for provisioning, hardening, and managin
   - Samba SMB3 service on encrypted storage hosts exposing Btrfs subvolumes in read-only mode with native macOS Finder "Previous Versions" snapshot navigation (`vfs_shadow_copy2`).
   - Automated Mac backups via `rsync` over SSH into target directory `/home/olivier/data/sync/mac/`.
 - **Unified Observability & Health Telemetry**:
-  - Grafana Alloy collector daemon deployed across all nodes via native systemd sandboxing (`ProtectSystem=strict`, `MemoryMax=512M`, `Nice=15`).
-  - Streams host metrics (CPU, RAM, temperatures), Btrfs filesystem and LUKS mapper I/O statistics (`prometheus.exporter.unix`) to Grafana Cloud Mimir.
+  - Grafana Alloy collector daemon (`alloy.service`) and Prometheus `smartctl_exporter` (`smartctl_exporter.service`) deployed across all nodes via native systemd sandboxing (`ProtectSystem=strict`, `MemoryMax=512M`/`128M`, `Nice=15`/`10`).
+  - Streams host metrics (CPU, RAM, load, process wait states, NTP sync, temperatures), S.M.A.R.T. hardware disk health, Btrfs filesystem/chunk/redundancy metrics, LUKS mapper I/O statistics (`prometheus.exporter.unix`), and systemd unit states to Grafana Cloud Mimir.
+  - Self-monitors Alloy daemon metrics and health on internal port `12345/metrics`.
   - Ships structured, whitelist-filtered systemd journal logs (`loki.source.journal`) to Grafana Cloud Loki.
   - LAN-accessible internal web UI (`12345/tcp`) protected by UFW firewall rules.
+- **Declarative Dashboards as Code (`dashboards/`)**:
+  - Complete dashboard suite (`domus-host`, `domus-storage`, `domus-backups`, `domus-alloy-health`) defined programmatically in Go using the official Grafana Foundation SDK (`dashboardv2`).
+  - Ephemeral pre-commit developer preview deployment (`./scripts/dashboards.sh preview [branch]`) and live telemetry/snapshot verification (`./scripts/dashboards.sh test-live [branch]`).
+  - Automated continuous delivery pipeline (`.github/workflows/dashboards.yml`) deploying PR previews and production dashboards on merge to `main`.
 - **System Hardening**: Baseline configuration covering `ufw` firewall (dual-stack IPv4/IPv6), SSH keys, locales, NTP, and administration tools.
 
 ---
@@ -102,6 +107,9 @@ uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml --
 
 # Scoped run targeting Alloy telemetry only
 uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml --tags alloy
+
+# Scoped run targeting S.M.A.R.T. disk monitoring only
+uv run ansible-playbook -i ansible/envs/live/inventory.ini ansible/system.yml --tags smartctl
 ```
 
 ### 3. Unlock Storage After Server Reboot
@@ -162,7 +170,7 @@ Inspects base system identity/uptime, locales/keyboard, time/NTP sync, SSH daemo
 # Full health report
 uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml
 
-# Scoped report using tags (base, locales, ntp, sshd, ufw, crypto, snapshot, rclone, samba, runner)
+# Scoped report using tags (base, locales, ntp, sshd, ufw, alloy, smartctl, crypto, snapshot, rclone, samba, runner)
 uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --tags crypto,samba
 ```
 
@@ -181,9 +189,12 @@ uv run ansible-playbook -i ansible/envs/lab/inventory.ini ansible/status.yml --t
 
 ## 🛠️ Utility & Test Scripts (`scripts/`)
 
-The repository includes a modular lab integration test runner targeting `debian.delarche.fr`:
+The repository includes modular operational and testing utilities:
 
 - **[`scripts/test-lab.sh`](scripts/test-lab.sh)**: Automated non-regression test runner supporting granular subcommands (`check-prereqs`, `system-and-ufw`, `storage-wipe-and-unlock`, `backup-and-sync`, `samba`, `corner-cases-and-raid1`, `status`, `all`).
+- **[`scripts/dashboards.sh`](scripts/dashboards.sh)**: Declarative Grafana dashboards orchestration CLI for local pre-commit previews (`preview`, `clean-preview`), end-to-end live testing (`test-live`), CI validation (`validate`), and production deployment (`deploy`).
+- **[`scripts/verify_live.py`](scripts/verify_live.py)**: Automated live verification engine asserting variable population, panel telemetry validity, and headless snapshot renders against Grafana Cloud Mimir and Loki endpoints.
+
 
 ---
 
@@ -194,4 +205,4 @@ All contributions must pass the full pre-commit test suite before committing:
 ```bash
 uv run pre-commit run --all-files
 ```
-Enforces `ansible-lint`, `yamllint`, `shellcheck`, and standard security checks.
+Enforces `ansible-lint`, `yamllint`, `shellcheck`, `check-ansible-vault`, Go static analysis and unit tests (`gofmt`, `go vet`, `staticcheck`, `go test -race`), and Grafana Cloud dashboard schema validation (`dashboards-validate`).

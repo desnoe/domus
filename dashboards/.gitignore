@@ -1,0 +1,9 @@
+# Ephemeral generated manifests
+resources/
+dist/
+*.json
+*.yaml
+
+# Local build artifacts
+bin/
+# dashboards

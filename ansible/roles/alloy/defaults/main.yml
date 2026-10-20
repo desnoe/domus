@@ -29,3 +29,11 @@ alloy_service_io_priority: 7
 alloy_smartctl_enabled: true
 alloy_smartctl_address: "127.0.0.1:9633"
 alloy_smartctl_scrape_interval: "120s"
+
+# Self-monitoring of Grafana Alloy process and pipelines
+alloy_self_metrics_enabled: true
+alloy_self_metrics_scrape_interval: "60s"
+
+# Systemd unit state collector configuration
+alloy_systemd_collector_enabled: true
+alloy_systemd_unit_include: "^(rclone-sync-.*|btrfs-snapshot-.*|btrfs-scrub-.*|smbd|alloy|smartctl_exporter|ufw|ssh)[.]service$"

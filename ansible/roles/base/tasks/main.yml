@@ -68,3 +68,12 @@
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
     mode: "0700"
+
+- name: Ensure user home directory allows traverse for monitoring daemons for {{ ansible_user }}
+  become: true
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"

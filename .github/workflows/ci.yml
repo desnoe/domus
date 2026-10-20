@@ -28,6 +28,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: dashboards/go.sum
+
       - name: Set up uv and Python 3.11
         uses: astral-sh/setup-uv@v4
         with:
@@ -45,7 +51,7 @@ jobs:
           echo "ci-static-placeholder" > ~/.ansible_vault_pass
           chmod 600 ~/.ansible_vault_pass
 
-      - name: Run full pre-commit suite (16 hooks)
+      - name: Run full pre-commit suite (21 hooks)
         run: uv run pre-commit run --all-files --show-diff-on-failure
 
       - name: Verify syntax of all Ansible playbooks

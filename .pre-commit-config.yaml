@@ -47,3 +47,50 @@ repos:
         files: ^ansible/.*
         pass_filenames: false
         always_run: true
+
+      - id: go-fmt
+        name: go-fmt
+        entry: >-
+          bash -c 'out=$(gofmt -s -l dashboards);
+          if [ -n "$out" ]; then
+            echo "Unformatted Go files detected (run gofmt -s -w dashboards):";
+            echo "$out";
+            exit 1;
+          fi'
+        language: system
+        files: ^dashboards/.*\.go$
+        pass_filenames: false
+
+      - id: go-vet
+        name: go-vet
+        entry: bash -c 'cd dashboards && go vet ./...'
+        language: system
+        files: ^dashboards/.*
+        pass_filenames: false
+
+      - id: go-staticcheck
+        name: go-staticcheck
+        entry: >-
+          bash -c 'export PATH="$HOME/go/bin:$PATH";
+          if command -v staticcheck >/dev/null 2>&1; then
+            cd dashboards && staticcheck ./...;
+          else
+            cd dashboards && go run honnef.co/go/tools/cmd/staticcheck@latest ./...;
+          fi'
+        language: system
+        files: ^dashboards/.*
+        pass_filenames: false
+
+      - id: go-test
+        name: go-test
+        entry: bash -c 'cd dashboards && go test -race ./...'
+        language: system
+        files: ^dashboards/.*
+        pass_filenames: false
+
+      - id: dashboards-validate
+        name: dashboards-validate
+        entry: ./scripts/dashboards.sh validate
+        language: system
+        files: ^(dashboards/.*|scripts/dashboards\.sh)$
+        pass_filenames: false

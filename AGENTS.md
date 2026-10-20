@@ -8,6 +8,11 @@
   - Git commit messages and pull request descriptions
   - Configuration comments (`.ansible-lint`, `.yamllint`, `ansible.cfg`, etc.)
 - **Conversations with users**: Even if conversations or requests with users take place in French (or any other language), all artifacts, commits, and file modifications in this repository must remain strictly in English.
+- **Git & Commit Standards (Conventional Commits)**:
+  - All commit messages and pull request titles MUST strictly follow the [Conventional Commits](https://www.conventionalcommits.org/) specification: `<type>(<scope>): <short description>`.
+  - Allowed types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
+  - Scopes must reflect the affected subsystem or component (e.g. `storage`, `crypto`, `backup`, `rclone`, `snapshot`, `samba`, `alloy`, `observability`, `dashboards`, `ufw`, `ci`, `docs`).
+  - Commit descriptions must be written in English, in the imperative present tense, lowercase, without a trailing period (e.g., `feat(dashboards): refine multi-disk reporting and compact header layout`).
 
 ---
 
@@ -47,13 +52,13 @@
 
 - **Pre-commit & Code Quality**:
   - All contributions must pass `uv run pre-commit run --all-files` with a clean exit code (`0`).
-  - Linters enforced at maximum strictness: `ansible-lint --strict` (`profile: production`), `yamllint --strict` (`level: error`), `shellcheck --severity=style`, `check-ansible-vault`, and `pre-commit-hooks` (`v5.0.0`).
+  - Linters enforced at maximum strictness: `ansible-lint --strict` (`profile: production`), `yamllint --strict` (`level: error`), `shellcheck --severity=style`, `check-ansible-vault`, `go-fmt`, `go-vet`, `go-staticcheck`, `go-test`, `dashboards-validate`, and `pre-commit-hooks` (`v5.0.0`).
 
-- **Grafana Cloud Management (`gcx`)**:
+- **Grafana Cloud Management (`gcx`) & Observability Standards**:
   - The `gcx` CLI is installed and authenticated on the controller.
   - **Using the `domus` context is mandatory for all `gcx` commands** (`gcx --context domus ...` or explicit `--context domus` flag). Never omit the context to prevent querying or modifying unintended stacks or organizations.
   - Use `gcx` to inspect datasources, retrieve Prometheus/Mimir and Loki push endpoints, and verify end-to-end telemetry ingestion via `gcx metrics query --context domus '<PromQL>'` and `gcx logs query --context domus '<LogQL>'`.
-
+  - **Alerting-to-Dashboard Parity (Mandatory)**: Any metric evaluated in an alerting rule (Phase 2) or used for health monitoring MUST systematically be visualizable in a dashboard panel. Never introduce an alerting metric that cannot be directly inspected and diagnosed on a Grafana dashboard.
 
 ---
 
@@ -78,7 +83,7 @@
 
 Playbooks are strictly separated by operational responsibility (no role duplication):
 1. `ansible/bootstrap.yml`: Day-0 SSH key & passwordless sudo setup (`apt`, `sudo`, `sshd`), chaining `ansible/system.yml`.
-2. `ansible/system.yml`: OS baseline, packages, firewall (`ufw`), time sync (`ntp`), and hardening (`hosts: all`), GitHub Actions self-hosted runner provisioning/upgrades via the `runner` role (`hosts: runner`), and Samba file sharing with Previous Versions via the `samba` role (`hosts: crypto`).
+2. `ansible/system.yml`: OS baseline, packages, firewall (`ufw`), time sync (`ntp`), hardening, unified observability (`alloy`), and S.M.A.R.T. disk monitoring (`smartctl`) (`hosts: all`), GitHub Actions self-hosted runner provisioning/upgrades via the `runner` role (`hosts: runner`), and Samba file sharing with Previous Versions via the `samba` role (`hosts: crypto`).
 3. `ansible/storage-unlock.yml`: Non-destructive post-reboot LUKS unlock, `btrfs device scan`, and subvolume mounting (`hosts: crypto`).
 4. `ansible/storage-wipe-and-reset.yml`: Destructive storage reset with interactive `WIPE` confirmation (`hosts: crypto`).
 5. `ansible/storage-replace.yml`: Guided Btrfs RAID1 member disk replacement (`hosts: crypto`), supporting auto-detection of unformatted/closed disks across multiple pools or targeted replacement via `-e replace_pool=<pool> -e replace_index=<idx>`.
@@ -87,7 +92,7 @@ Playbooks are strictly separated by operational responsibility (no role duplicat
 8. `ansible/storage-remove.yml`: Targeted permanent decommissioning and wiping of an encrypted storage pool (`hosts: crypto`), supporting interactive pool selection or `-e remove_pool=<pool> -e confirm_remove=yes`.
 9. `ansible/storage-normalize-unicode.yml`: Normalizes filenames to UTF-8 NFC via `convmv` for Samba and macOS client compatibility (`hosts: crypto`), supporting `-e target_path=<path>`.
 10. `ansible/backup.yml`: Deploys `snapshot` and `rclone` `systemd.service` and `systemd.timer` units (`hosts: crypto`).
-11. `ansible/status.yml`: Read-only health reporting across `base`, `locales`, `ntp`, `sshd`, `ufw` (`hosts: all`), `crypto`, `snapshot`, `rclone`, `samba` (`hosts: crypto`), and `runner` (`hosts: runner`) roles (supports `--tags base|locales|ntp|sshd|ufw|crypto|snapshot|rclone|samba|runner`).
+11. `ansible/status.yml`: Read-only health reporting across `base`, `locales`, `ntp`, `sshd`, `ufw`, `alloy`, `smartctl` (`hosts: all`), `crypto`, `snapshot`, `rclone`, `samba` (`hosts: crypto`), and `runner` (`hosts: runner`) roles (supports `--tags base|locales|ntp|sshd|ufw|alloy|smartctl|crypto|snapshot|rclone|samba|runner`).
 
 ---
 

@@ -8,11 +8,11 @@ This document centralizes all static, functional, security, and chaos/corner-cas
 
 ```mermaid
 flowchart LR
-    QA["1. Static Quality Gates (TC-QA-01..02)"] --> SYS["2. System, Locales, NTP & SSHD (TC-SYS-01..04)"]
+    QA["1. Static Quality Gates (TC-QA-01..02)"] --> SYS["2. System, Locales, NTP & SSHD (TC-SYS-01..05)"]
     SYS --> FW["3. UFW Dual-Stack Firewall (TC-FW-01..03)"]
-    FW --> OBS["4. Unified Observability & Alloy (TC-OBS-01..02)"]
-    OBS --> STO["5. LUKS & Btrfs RAID1 Storage (TC-STO-01..04)"]
-    STO --> BAK["6. Systemd Rclone & Snapshots (TC-BAK-01..04)"]
+    FW --> OBS["4. Unified Observability & Dashboards (TC-OBS-01..03)"]
+    OBS --> STO["5. LUKS & Btrfs RAID1 Storage (TC-STO-01..08)"]
+    STO --> BAK["6. Systemd Rclone & Snapshots (TC-BAK-01..07)"]
     BAK --> SMB["7. Samba & Shadow Copies (TC-SMB-01..07)"]
     SMB --> ADV["8. Advanced Corner Cases & Chaos (TC-ADV-01..06)"]
     ADV --> RUN["9. Master Non-Regression Checklist"]
@@ -20,10 +20,10 @@ flowchart LR
 
 | Domain Prefix | Scope | Playbooks / Components Covered | Test Count |
 | :--- | :--- | :--- | :--- |
-| **`TC-QA`** | Static Quality Gates & Linting | `.pre-commit-config.yaml`, `.ansible-lint`, `.yamllint`, `shellcheck`, `vault.yml` | 2 |
+| **`TC-QA`** | Static Quality Gates & Linting | `.pre-commit-config.yaml`, `.ansible-lint`, `.yamllint`, `shellcheck`, `vault.yml`, `dashboards/` | 2 |
 | **`TC-SYS`** | System Baseline, Locales, Time, SSH & S.M.A.R.T. | `bootstrap.yml`, `system.yml`, `apt`, `base`, `locales`, `ntp`, `sshd`, `sudo`, `vim`, `htop`, `smartctl` | 5 |
 | **`TC-FW`** | Dual-Stack Firewall (`ufw`) | `system.yml`, `ufw` role, `iptables` / `ip6tables` kernel chains | 3 |
-| **`TC-OBS`** | Unified Observability & Telemetry | `system.yml`, `status.yml`, `alloy` role, Grafana Alloy HTTP probe | 2 |
+| **`TC-OBS`** | Unified Observability, Telemetry & Dashboards | `system.yml`, `status.yml`, `alloy` role, `dashboards/`, `scripts/dashboards.sh`, `scripts/verify_live.py` | 3 |
 | **`TC-STO`** | Encrypted Storage & Btrfs RAID1 | `storage-wipe-and-reset.yml`, `storage-unlock.yml`, `storage-replace.yml`, `crypto` role | 8 |
 | **`TC-BAK`** | Cloud Sync & Btrfs Snapshots (`systemd`) | `backup.yml`, `status.yml`, `rclone` role, `snapshot` role | 7 |
 | **`TC-SMB`** | Samba File Sharing & Shadow Copies | `system.yml`, `status.yml`, `samba` role, `vfs_shadow_copy2`, `smbclient` | 7 |
@@ -34,7 +34,7 @@ flowchart LR
 ## 1. Static Quality Gates & Linting (`TC-QA`)
 
 ### `TC-QA-01` — Full Pre-Commit Hook Suite
-- **Objective**: Verify that all YAML, Ansible, Bash, and Vault files comply with strict production linting rules before any deployment.
+- **Objective**: Verify that all YAML, Ansible, Bash, Go, and Vault files comply with strict production linting and validation rules before any deployment.
 - **Preconditions**: Local Python 3.11 `.venv` initialized via `uv sync` and Ansible collections installed in `ansible/collections/`.
 - **Commands**:
   ```bash
@@ -42,12 +42,12 @@ flowchart LR
   ```
 - **Expected Result**:
   - Exit code `0`.
-  - All 16 hooks report `Passed` (`ansible-lint --strict` with `profile: production`, `yamllint --strict`, `shellcheck --severity=style`, `check-ansible-vault`, and `pre-commit-hooks v5.0.0`).
+  - All 21 hooks report `Passed` (`ansible-lint --strict` with `profile: production`, `yamllint --strict`, `shellcheck --severity=style`, `check-ansible-vault`, `go-fmt`, `go-vet`, `go-staticcheck`, `go-test`, `dashboards-validate`, and `pre-commit-hooks v5.0.0`).
 
 ---
 
 ### `TC-QA-02` — Playbook Syntax & Vault Encryption Verification
-- **Objective**: Ensure all 7 operational playbooks parse cleanly across `lab` and `live` inventories and no `vault.yml` file is stored in plaintext.
+- **Objective**: Ensure all 11 operational playbooks parse cleanly across `lab` and `live` inventories and no `vault.yml` file is stored in plaintext.
 - **Preconditions**: `~/.ansible_vault_pass` present (`mode 0600`).
 - **Commands**:
   ```bash
@@ -221,6 +221,20 @@ flowchart LR
 - **Expected Result**:
   - UFW rules contain `12345/tcp ALLOW IN <alloy_allowed_subnet>`.
   - `status.yml` executes with exit code `0` and prints the `GRAFANA ALLOY STATUS REPORT` with `Active State: active` and `HTTP Readiness: 200`.
+
+---
+
+### `TC-OBS-03` — Declarative Dashboards Validation & Live Telemetry Verification
+- **Objective**: Verify that the Go dashboard generator (`dashboards/`) passes unit tests and schema validation against Grafana Cloud, and that all 121 panel and variable queries across `domus-host`, `domus-storage`, `domus-backups`, and `domus-alloy-health` return live telemetry and render populated PNG snapshots.
+- **Preconditions**: `gcx` authenticated with `--context domus`.
+- **Commands**:
+  ```bash
+  ./scripts/dashboards.sh validate
+  ./scripts/dashboards.sh test-live
+  ```
+- **Expected Result**:
+  - `validate` passes Go unit tests (`go test -v ./...`) and `gcx --context domus resources validate` with `0` errors.
+  - `test-live` deploys the ephemeral preview folder, passes all 121 live Mimir/Loki telemetry and snapshot rendering checks, and automatically purges the preview folder on exit.
 
 ---
 
