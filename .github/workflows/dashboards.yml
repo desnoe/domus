@@ -29,6 +29,7 @@ permissions:
 
 env:
   GCX_VERSION: '1.6.0'
+  GCX_KEYCHAIN: 'off'
   GRAFANA_URL: ${{ secrets.GRAFANA_URL }}
   GRAFANA_TOKEN: ${{ secrets.GRAFANA_TOKEN }}
 
