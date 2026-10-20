@@ -1,0 +1,175 @@
+---
+name: Dashboards CI/CD
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'dashboards/**'
+      - 'ansible/roles/alloy/**'
+      - 'scripts/dashboards.sh'
+      - '.github/workflows/dashboards.yml'
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - closed
+    paths:
+      - 'dashboards/**'
+      - 'ansible/roles/alloy/**'
+      - 'scripts/dashboards.sh'
+      - '.github/workflows/dashboards.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  GCX_VERSION: '1.6.0'
+  GRAFANA_URL: ${{ secrets.GRAFANA_URL }}
+  GRAFANA_TOKEN: ${{ secrets.GRAFANA_TOKEN }}
+
+jobs:
+  test-and-validate:
+    name: Test & Validate Dashboards
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: dashboards/go.sum
+
+      - name: Run Go Unit Tests
+        run: |
+          cd dashboards
+          go test -v ./...
+
+      - name: Install gcx CLI
+        run: |
+          mkdir -p "${HOME}/.local/bin"
+          GCX_URL="https://github.com/grafana/gcx/releases/download/v${GCX_VERSION}/gcx_${GCX_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL "${GCX_URL}" | tar -xz -C "${HOME}/.local/bin" gcx
+          chmod +x "${HOME}/.local/bin/gcx"
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+
+      - name: Authenticate gcx
+        if: env.GRAFANA_TOKEN != ''
+        run: |
+          gcx login domus --server "${GRAFANA_URL:-https://domus.grafana.net}" --token "${GRAFANA_TOKEN}" --yes
+
+      - name: Validate Manifests (Production & Preview)
+        run: |
+          ./scripts/dashboards.sh validate
+
+  preview-deploy:
+    name: Deploy PR Preview Dashboards
+    needs: test-and-validate
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        if: env.GRAFANA_TOKEN != ''
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        if: env.GRAFANA_TOKEN != ''
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: dashboards/go.sum
+
+      - name: Install gcx CLI
+        if: env.GRAFANA_TOKEN != ''
+        run: |
+          mkdir -p "${HOME}/.local/bin"
+          GCX_URL="https://github.com/grafana/gcx/releases/download/v${GCX_VERSION}/gcx_${GCX_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL "${GCX_URL}" | tar -xz -C "${HOME}/.local/bin" gcx
+          chmod +x "${HOME}/.local/bin/gcx"
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+
+      - name: Authenticate gcx
+        if: env.GRAFANA_TOKEN != ''
+        run: |
+          gcx login domus --server "${GRAFANA_URL:-https://domus.grafana.net}" --token "${GRAFANA_TOKEN}" --yes
+
+      - name: Deploy PR Preview Dashboards
+        if: env.GRAFANA_TOKEN != ''
+        run: |
+          TMP_DIR=$(mktemp -d)
+          cd dashboards
+          go run . -env pr -pr "${{ github.event.pull_request.number }}" -out "${TMP_DIR}"
+          gcx --context domus resources push -p "${TMP_DIR}" --on-error abort
+
+      - name: Verify Live Telemetry & Variable Selectors
+        if: env.GRAFANA_TOKEN != ''
+        run: |
+          python3 scripts/verify_live.py --pr "${{ github.event.pull_request.number }}" --skip-snapshots
+
+  preview-cleanup:
+    name: Clean PR Preview Dashboards
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install gcx CLI
+        if: env.GRAFANA_TOKEN != ''
+        run: |
+          mkdir -p "${HOME}/.local/bin"
+          GCX_URL="https://github.com/grafana/gcx/releases/download/v${GCX_VERSION}/gcx_${GCX_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL "${GCX_URL}" | tar -xz -C "${HOME}/.local/bin" gcx
+          chmod +x "${HOME}/.local/bin/gcx"
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+
+      - name: Authenticate gcx
+        if: env.GRAFANA_TOKEN != ''
+        run: |
+          gcx login domus --server "${GRAFANA_URL:-https://domus.grafana.net}" --token "${GRAFANA_TOKEN}" --yes
+
+      - name: Delete PR Preview Folder
+        if: env.GRAFANA_TOKEN != ''
+        run: |
+          FOLDER_UID="domus-pr-${{ github.event.pull_request.number }}"
+          gcx --context domus api "/api/folders/${FOLDER_UID}" -X DELETE || true
+
+  production-deploy:
+    name: Deploy Production Dashboards
+    needs: test-and-validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        if: env.GRAFANA_TOKEN != ''
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        if: env.GRAFANA_TOKEN != ''
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: dashboards/go.sum
+
+      - name: Install gcx CLI
+        if: env.GRAFANA_TOKEN != ''
+        run: |
+          mkdir -p "${HOME}/.local/bin"
+          GCX_URL="https://github.com/grafana/gcx/releases/download/v${GCX_VERSION}/gcx_${GCX_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL "${GCX_URL}" | tar -xz -C "${HOME}/.local/bin" gcx
+          chmod +x "${HOME}/.local/bin/gcx"
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+
+      - name: Authenticate gcx
+        if: env.GRAFANA_TOKEN != ''
+        run: |
+          gcx login domus --server "${GRAFANA_URL:-https://domus.grafana.net}" --token "${GRAFANA_TOKEN}" --yes
+
+      - name: Deploy Production Dashboards
+        if: env.GRAFANA_TOKEN != ''
+        run: |
+          ./scripts/dashboards.sh deploy

@@ -19,8 +19,10 @@ This document defines the strategic roadmap, planned architectural milestones, a
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │ Phase 1: Observability & Health Monitoring                             │
-│   ├── Milestone 1.1: Unified Observability with Grafana Cloud Free Tier │
-│   └── Milestone 1.2: S.M.A.R.T. & Automated Btrfs Scrub Verification    │
+│   ├── Milestone 1.1: Unified Observability with Grafana Cloud Free Tier│
+│   ├── Milestone 1.2: S.M.A.R.T. & Automated Btrfs Scrub Verification   │
+│   ├── Milestone 1.3: Declarative Dashboards as Code via Foundation SDK │
+│   └── Milestone 1.4: Telemetry Pipeline Optimization & Source Filtering│
 ├────────────────────────────────────────────────────────────────────────┤
 │ Phase 2: Proactive Alerting & Notifications                            │
 │   ├── Milestone 2.1: Grafana Cloud Alerting Rules                      │
@@ -38,7 +40,7 @@ This document defines the strategic roadmap, planned architectural milestones, a
 
 ## 🚀 Phase 1: Observability & Health Monitoring
 
-### Milestone 1.1 — Unified Observability with Grafana Cloud Free Tier
+### Milestone 1.1 — Unified Observability with Grafana Cloud Free Tier `[Implemented]`
 
 Deploy **Grafana Alloy** (the unified, lightweight OpenTelemetry-collector-based agent) across all nodes via a dedicated Ansible role `ansible/roles/alloy`. Alloy replaces multiple disparate collectors, routing metrics and systemd journal logs directly to the Grafana Cloud Free Tier.
 
@@ -142,6 +144,66 @@ Proactive disk degradation detection before silent hardware failure causes data 
    - Zero disruption: I/O priority set to idle class (`IOSchedulingClass=idle`, `Nice=19`).
    - Sandboxing: `ProtectSystem=strict`, `ProtectHome=read-only`, `ReadWritePaths=/var/lib/btrfs`.
    - Automated error propagation: Scrub output streams into systemd journald (ingested by Loki via Alloy), while any checksum/read errors update kernel stats (`btrfs device stats`), automatically incrementing `node_btrfs_device_errors_total` exported to Prometheus.
+
+---
+
+### Milestone 1.3 — Declarative Dashboards as Code via Grafana Foundation SDK (Go) & Continuous Delivery Pipeline `[Implemented]`
+
+Deploy a reproducible, code-defined Grafana dashboard suite managed in Go via the official **Grafana Foundation SDK** (`github.com/grafana/grafana-foundation-sdk/go`). Dashboards provide complete visibility across all ingested system telemetry, backed by a local pre-commit branch preview workflow and automated GitHub Actions delivery.
+
+#### Architectural Specifications
+
+1. **Dashboard Project Architecture (`dashboards/`)**:
+   - Centralized Go project under `dashboards/` generating Kubernetes-compatible Grafana dashboard manifests (`dashboard.grafana.app/v0alpha1` / `v1alpha1`).
+   - Manifests are dynamically rendered on the fly (gitignored), avoiding repository noise while maintaining strict versioning of dashboard generator logic.
+   - Reusable builder helpers (`dashboards/internal/builder/`) defining shared datasources (`grafanacloud-domus-prom`, `grafanacloud-domus-logs`), query helpers, unified color palettes, units, and auto-grid layouts.
+
+2. **Core Dashboard Catalog**:
+   - **`domus-host` (Compute & Network)**:
+     - Compact 4-metric synthesis header (`Uptime`, `CPU Busy`, `Memory Used`, `Load 1m`).
+     - CPU utilization across cores/modes, load averages (1m, 5m, 15m), context switches/interrupts, and process execution states (`node_procs_running`, `node_procs_blocked`).
+     - Memory distribution (Used, Available, Buffers, Cached, Dirty/Writeback, Swap) and OOM kill events (`node_vmstat_oom_kill`).
+     - System hardware thermals (`node_thermal_zone_temp`), file descriptors, OS and kernel version metadata (`node_uname_info`), and NTP synchronization status & maximum estimated error (`node_timex_sync_status`, `node_timex_offset_seconds`, `node_timex_maxerror_seconds`).
+     - Network interface bandwidth (Rx/Tx bytes/s), packet rates, error counters, drop rates, TCP socket states (`node_sockstat_TCP_*`), and TCP retransmission rates.
+   - **`domus-storage` (LUKS, Btrfs & Hardware S.M.A.R.T.)**:
+     - Compact 4-metric synthesis header (`S.M.A.R.T. Drive Health`, `Critical Sectors`, `Storage Capacity Used`, `Total Disk I/O Rate`).
+     - Separated physical block devices (`sd*`/`nvme*`) and LUKS dm-crypt mappers (`dm-*`) read/write throughput, IOPS, average I/O latency, and utilization (`node_disk_*`).
+     - Btrfs subvolume filesystem capacity, available space, inode utilization (`node_filesystem_files`), underlying block device error counts (`node_filesystem_device_error`), and read-only health badges (`node_filesystem_readonly`).
+     - Btrfs pool label propagation (`* on(uuid) group_left(label) node_btrfs_info`) for member disk physical size, unallocated physical space (`node_btrfs_device_unused_bytes`), device errors, chunk allocations (Data/Metadata/System), redundancy allocation ratio (`node_btrfs_allocation_ratio`), and global reserve (`node_btrfs_global_rsv_size_bytes`).
+     - S.M.A.R.T. multi-drive telemetry: overall SMART status, smartctl command execution exit status (`smartctl_device_smartctl_exit_status`), ATA error log entries (`smartctl_device_error_log_count`), drive media type and rotational speed (`smartctl_device_rotation_rate`), operating temperature, raw capacity (`smartctl_device_capacity_bytes`), power-on hours, power cycles (`smartctl_device_power_cycle_count`), dedicated critical sector panels (Reallocated, Current Pending, Offline Uncorrectable, UDMA CRC), and tall Loki hardware exporter audit logs.
+   - **`domus-backups` (Backup Units & Audit Logs)**:
+     - Compact 4-metric synthesis header (`Failed Services`, `Active Daemons`, `Active Backup Execution`, `Audit Log Errors (24h)`).
+     - Interactive Monitored Services Inventory table (`table`) with colored status badges (`ACTIVE`, `STANDBY`, `FAILED`), Active Service Failures multi-stat alert card, and a 24-Hour Service Execution Timeline (`statetimeline`) tracking `rclone-sync-*`, `btrfs-snapshot-*`, `btrfs-scrub-*`, `smbd`, `alloy`, `smartctl_exporter`, `ufw`, and `ssh` units.
+     - Full-width tall Loki journald log viewer (`logs`) for backup, scrub, and storage operations.
+   - **`domus-alloy-health` (Alloy Telemetry Pipeline)**:
+     - Compact 4-metric synthesis header (`Alloy Agent Status`, `Alloy Memory (RSS)`, `Samples Sent Rate`, `Dropped Samples / Logs`).
+     - Process-level resource consumption: Alloy CPU, resident memory (RSS), and Go runtime goroutines.
+     - Scrape target health, `prometheus.remote_write` throughput, active shards, dropped samples, retries, and Loki log shipping rate, batch retries, and dropped entries.
+
+3. **Pre-Commit Branch Preview & Live Verification Workflow (`scripts/dashboards.sh` & `scripts/verify_live.py`)**:
+   - Local command `./scripts/dashboards.sh preview [branch]` dynamically resolves the current Git branch and generates dashboards targeting an isolated Grafana Cloud folder `domus-prev-<slug>`.
+   - Manifests are validated and pushed directly via `gcx --context domus resources push`, outputting clickable dashboard URLs in the terminal.
+   - Automated live verification `./scripts/dashboards.sh test-live [branch]` (backed by `scripts/verify_live.py`) verifies `$host` template variable population, asserts that all 121 panel queries return live Mimir/Loki telemetry without errors, validates headless PNG snapshot renders, and purges the preview folder on exit.
+   - Companion cleanup command `./scripts/dashboards.sh clean-preview [branch]` purges the branch preview folder and test dashboards from Grafana Cloud.
+
+4. **Continuous Delivery Pipeline (`.github/workflows/dashboards.yml`)**:
+   - **Pull Request Lifecycle**:
+     - Validates Go syntax, runs unit tests (`go test -v ./...`), and validates manifests against Grafana Cloud.
+     - Automatically deploys preview dashboards to temporary folder `domus-pr-<number>` on Grafana Cloud and executes live telemetry verification (`scripts/verify_live.py`).
+     - Automatically cleans up and purges folder `domus-pr-<number>` upon PR closure.
+   - **Production Release**:
+     - On merge to `main`, automatically compiles and deploys production manifests to the primary `domus` folder in Grafana Cloud (`./scripts/dashboards.sh deploy`).
+
+---
+
+### Milestone 1.4 — Telemetry Pipeline Optimization & Metric Filtering at Source
+
+Prune superfluous low-level kernel metrics at the Alloy ingestion layer to maintain strict 1:1 parity between collected Prometheus series and dashboard visualization panels:
+1. **Source Filtering Refinement (`ansible/roles/alloy`)**:
+   - Review and tighten the `metrics_filter` keep regex in `config.alloy.j2` to drop non-actionable raw kernel counters (e.g. obscure memory buffers, deep paging counters, unused network protocol errors).
+   - Ensure every retained metric series directly feeds a visual panel or an alerting rule.
+2. **Cardinality & Budget Protection**:
+   - Guarantee active Prometheus series usage remains below 1,000 series across all nodes, maximizing headroom under the Grafana Cloud Free Tier budget (10,000 series limit).
 
 ---
 

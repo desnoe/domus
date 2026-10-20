@@ -15,12 +15,21 @@ prometheus.exporter.unix "node" {
     "netstat",
     "sockstat",
     "stat",
+{% if alloy_systemd_collector_enabled | default(true) %}
+    "systemd",
+{% endif %}
     "thermal_zone",
     "time",
     "timex",
     "uname",
     "vmstat",
   ]
+
+{% if alloy_systemd_collector_enabled | default(true) %}
+  systemd {
+    unit_include = "{{ alloy_systemd_unit_include }}"
+  }
+{% endif %}
 
   filesystem {
     fs_types_exclude     = "^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tmpfs|tracefs)$"
@@ -62,7 +71,7 @@ prometheus.relabel "metrics_filter" {
   // Dashboard-aligned keep filter + domus Btrfs RAID1 & thermal metrics
   rule {
     source_labels = ["__name__"]
-    regex         = "up|node_boot_time_seconds|node_btrfs_.*|node_context_switches_total|node_cpu_seconds_total|node_disk_io_time_seconds_total|node_disk_io_time_weighted_seconds_total|node_disk_read_bytes_total|node_disk_read_time_seconds_total|node_disk_reads_completed_total|node_disk_write_time_seconds_total|node_disk_writes_completed_total|node_disk_written_bytes_total|node_filefd_allocated|node_filefd_maximum|node_filesystem_avail_bytes|node_filesystem_device_error|node_filesystem_files|node_filesystem_files_free|node_filesystem_readonly|node_filesystem_size_bytes|node_intr_total|node_load1|node_load15|node_load5|node_memory_.*|node_netstat_.*|node_network_.*|node_sockstat_.*|node_thermal_zone_temp|node_time_zone_offset_seconds|node_timex_.*|node_uname_info|node_vmstat_oom_kill|node_vmstat_pg.*|node_vmstat_pswp.*"
+    regex         = "up|node_boot_time_seconds|node_btrfs_.*|node_context_switches_total|node_cpu_seconds_total|node_disk_io_time_seconds_total|node_disk_io_time_weighted_seconds_total|node_disk_read_bytes_total|node_disk_read_time_seconds_total|node_disk_reads_completed_total|node_disk_write_time_seconds_total|node_disk_writes_completed_total|node_disk_written_bytes_total|node_filefd_allocated|node_filefd_maximum|node_filesystem_avail_bytes|node_filesystem_device_error|node_filesystem_files|node_filesystem_files_free|node_filesystem_readonly|node_filesystem_size_bytes|node_intr_total|node_load1|node_load15|node_load5|node_memory_.*|node_netstat_.*|node_network_.*|node_procs_.*|node_sockstat_.*|node_systemd_unit_state|node_thermal_zone_temp|node_time_zone_offset_seconds|node_timex_.*|node_uname_info|node_vmstat_oom_kill|node_vmstat_pg.*|node_vmstat_pswp.*"
     action        = "keep"
   }
 
@@ -95,6 +104,44 @@ prometheus.relabel "smartctl_filter" {
   rule {
     source_labels = ["__name__"]
     regex         = "up|smartctl_.*"
+    action        = "keep"
+  }
+
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+}
+{% endif %}
+
+{% if alloy_self_metrics_enabled | default(true) %}
+// Alloy Internal Process & Pipeline Self-Monitoring Metrics
+prometheus.scrape "alloy" {
+  targets         = [
+    {"__address__" = "127.0.0.1:12345"},
+  ]
+  scrape_interval = "{{ alloy_self_metrics_scrape_interval | default('60s') }}"
+  forward_to      = [prometheus.relabel.alloy_filter.receiver]
+}
+
+prometheus.relabel "alloy_filter" {
+  rule {
+    target_label = "instance"
+    replacement  = "{{ inventory_hostname }}"
+  }
+  rule {
+    target_label = "host"
+    replacement  = "{{ inventory_hostname }}"
+  }
+  rule {
+    target_label = "job"
+    replacement  = "integrations/alloy"
+  }
+  rule {
+    source_labels = ["__name__"]
+    regex         = ".*_bucket"
+    action        = "drop"
+  }
+  rule {
+    source_labels = ["__name__"]
+    regex         = "up|alloy_.*|prometheus_remote_storage_.*|prometheus_remote_write_.*|loki_write_.*|process_cpu_seconds_total|process_resident_memory_bytes|go_goroutines"
     action        = "keep"
   }
 

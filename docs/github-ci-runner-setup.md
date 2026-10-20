@@ -14,9 +14,9 @@ flowchart TD
 
     subgraph Cloud ["Stage 1: GitHub-Hosted Cloud (ubuntu-latest — Automatic)"]
         direction TB
-        UV1["1. setup-uv@v4 + Python 3.11 + uv sync --frozen"]
+        UV1["1. setup-go@v5 + setup-uv@v4 + Python 3.11 + uv sync --frozen"]
         Gal1["2. ansible-galaxy collection install"]
-        PC["3. uv run pre-commit run --all-files (16 hooks)"]
+        PC["3. uv run pre-commit run --all-files (21 hooks)"]
         Syn["4. ansible-playbook --syntax-check (all playbooks)"]
         UV1 --> Gal1 --> PC --> Syn
     end
@@ -44,7 +44,7 @@ flowchart TD
    - Runs **automatically** on every `push` (any branch), every `pull_request`, and on manual `workflow_dispatch`.
    - Executes in an ephemeral, unprivileged GitHub-hosted cloud VM with **zero secrets**.
    - Creates a temporary placeholder `~/.ansible_vault_pass` (`0600`) so `ansible.cfg` (`vault_password_file = ~/.ansible_vault_pass`) satisfies static analysis without exposing the real Vault password.
-   - Runs all 16 `pre-commit` hooks (`ansible-lint --strict`, `yamllint --strict`, `shellcheck --severity=style`, `check-ansible-vault`, etc.) and validates the syntax of every playbook in `ansible/*.yml`.
+   - Runs all 21 `pre-commit` hooks (`ansible-lint --strict`, `yamllint --strict`, `shellcheck --severity=style`, `check-ansible-vault`, `go-fmt`, `go-vet`, `go-staticcheck`, `go-test`, `dashboards-validate`, etc.) and validates the syntax of every playbook in `ansible/*.yml`.
 2. **Stage 2 — `integration-tests-local` (`runs-on: self-hosted`)**:
    - Runs **automatically** after Stage 1 passes, unless the commit message contains `[skip-lab]`.
    - If a new commit arrives while a test campaign is running on the same branch, the in-progress run is **cancelled** (`cancel-in-progress: true`) and replaced by the new one.
